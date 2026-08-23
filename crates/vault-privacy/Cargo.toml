@@ -1,0 +1,27 @@
+[package]
+name = "vault-privacy"
+description = "Production-intent Ironwood note, key, and encryption layer for Vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+circuit = ["orchard/circuit"]
+
+[dependencies]
+blake3.workspace = true
+ff.workspace = true
+incrementalmerkletree.workspace = true
+orchard.workspace = true
+pasta_curves.workspace = true
+rand_core.workspace = true
+subtle.workspace = true
+zcash_note_encryption.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rand_chacha = "0.3.1"
+
+[lints]
+workspace = true

@@ -1,0 +1,41 @@
+name: zk-risc0
+
+on:
+  push:
+    paths:
+      - "crates/vault-protocol/**"
+      - "zk/risc0/**"
+      - "scripts/check-zk-risc0.sh"
+      - ".github/workflows/zk-risc0.yml"
+  pull_request:
+    paths:
+      - "crates/vault-protocol/**"
+      - "zk/risc0/**"
+      - "scripts/check-zk-risc0.sh"
+      - ".github/workflows/zk-risc0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zk-risc0-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install host Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.90.0 --profile minimal
+      - name: Install pinned RISC Zero manager
+        run: cargo install rzup --version 0.5.2 --locked --no-default-features --features cli,install
+      - name: Install pinned guest Rust
+        run: rzup install rust 1.97.0
+      - name: Verify experimental backend
+        run: ./scripts/check-zk-risc0.sh
+      - name: Verify experimental host MSRV
+        run: cd zk/risc0 && RISC0_SKIP_BUILD=1 cargo +1.90.0 check --workspace --all-targets --locked

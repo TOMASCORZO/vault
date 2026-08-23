@@ -1,0 +1,28 @@
+[package]
+name = "vault-zk-halo2-core"
+description = "Pinned Ironwood Halo2 Action proof layer for Vault transfer-v2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+blake3.workspace = true
+ff.workspace = true
+halo2_proofs.workspace = true
+halo2_gadgets.workspace = true
+orchard.workspace = true
+pasta_curves.workspace = true
+rand_core.workspace = true
+thiserror.workspace = true
+vault-burn = { path = "../../../crates/vault-burn" }
+vault-privacy = { path = "../../../crates/vault-privacy", features = ["circuit"] }
+vault-protocol = { path = "../../../crates/vault-protocol" }
+zeroize.workspace = true
+
+[dev-dependencies]
+incrementalmerkletree.workspace = true
+rand_chacha = "0.3.1"
+
+[lints]
+workspace = true

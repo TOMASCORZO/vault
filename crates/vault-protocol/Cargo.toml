@@ -1,0 +1,20 @@
+[package]
+name = "vault-protocol"
+description = "Consensus-facing H1 types and shielded-state validation for Vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+blake3.workspace = true
+rand_core.workspace = true
+vault-burn = { path = "../vault-burn" }
+vault-privacy = { path = "../vault-privacy" }
+
+[dev-dependencies]
+pasta_curves.workspace = true
+proptest.workspace = true
+rand_chacha = "0.3.1"
+
+[lints]
+workspace = true

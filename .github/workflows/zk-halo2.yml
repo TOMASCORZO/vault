@@ -1,0 +1,39 @@
+name: zk-halo2
+
+on:
+  push:
+    paths:
+      - "crates/vault-burn/**"
+      - "crates/vault-privacy/**"
+      - "crates/vault-protocol/**"
+      - "zk/halo2/**"
+      - "scripts/check-zk-halo2.sh"
+      - ".github/workflows/zk-halo2.yml"
+  pull_request:
+    paths:
+      - "crates/vault-burn/**"
+      - "crates/vault-privacy/**"
+      - "crates/vault-protocol/**"
+      - "zk/halo2/**"
+      - "scripts/check-zk-halo2.sh"
+      - ".github/workflows/zk-halo2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zk-halo2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install declared Rust toolchain
+        run: rustup toolchain install 1.85.1 --profile minimal --component rustfmt,clippy
+      - name: Verify pinned Halo2 backend
+        run: ./scripts/check-zk-halo2.sh
+        env:
+          RUSTUP_TOOLCHAIN: 1.85.1

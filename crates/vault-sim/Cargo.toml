@@ -1,0 +1,13 @@
+[package]
+name = "vault-sim"
+description = "Executable scenario for the Vault H0 accounting model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+vault-core = { path = "../vault-core" }
+
+[lints]
+workspace = true
+

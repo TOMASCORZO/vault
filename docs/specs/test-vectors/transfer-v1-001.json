@@ -1,0 +1,31 @@
+{
+  "schema": "vault.transfer-v1.transcript-vector",
+  "vector": 1,
+  "description": "H1 envelope binding vector; proof bytes equal the public-input digest for test-only verification and are not a cryptographic proof",
+  "protocol_version": 1,
+  "chain_id": "0101010101010101010101010101010101010101010101010101010101010101",
+  "circuit_id": "0202020202020202020202020202020202020202020202020202020202020202",
+  "anchor": "0303030303030303030303030303030303030303030303030303030303030303",
+  "nullifiers": [
+    "0404040404040404040404040404040404040404040404040404040404040404"
+  ],
+  "outputs": [
+    {
+      "note_commitment": "0707070707070707070707070707070707070707070707070707070707070707",
+      "ephemeral_key": "0505050505050505050505050505050505050505050505050505050505050505",
+      "ciphertext": "060708"
+    }
+  ],
+  "balance_commitment": "0909090909090909090909090909090909090909090909090909090909090909",
+  "burn": {
+    "commitment": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "ciphertext": "0b0c"
+  },
+  "gas": {
+    "units": 10,
+    "fee_per_gas": 2
+  },
+  "proof": "16ff379d455ae3c066ebeaee36017619ec5546dff5626cf546ea96ba44778933",
+  "expected_public_inputs_digest": "16ff379d455ae3c066ebeaee36017619ec5546dff5626cf546ea96ba44778933",
+  "expected_transaction_id": "472f91a359fe1e8cbee06b68f84b9d2e1e59e8324b3f90a8e8d29b363d213641"
+}

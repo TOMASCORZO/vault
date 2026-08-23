@@ -1,0 +1,27 @@
+[package]
+name = "vault-signer"
+description = "Production-intent authenticated signer transport and session binding for Vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+blake3.workspace = true
+chacha20poly1305.workspace = true
+fs2.workspace = true
+libc.workspace = true
+rand_core.workspace = true
+snow.workspace = true
+subtle.workspace = true
+tempfile.workspace = true
+vault-privacy = { path = "../vault-privacy" }
+vault-protocol = { path = "../vault-protocol" }
+x25519-dalek.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rand_chacha = "0.3.1"
+
+[lints]
+workspace = true

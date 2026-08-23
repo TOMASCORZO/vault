@@ -1,0 +1,18 @@
+[package]
+name = "vault-zk-risc0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bincode.workspace = true
+risc0-zkvm = { workspace = true, features = ["prove", "disable-dev-mode"] }
+thiserror.workspace = true
+vault-protocol = { path = "../../../crates/vault-protocol" }
+vault-zk-accounting-core = { path = "../core" }
+vault-zk-accounting-methods = { path = "../methods" }
+
+[lints]
+workspace = true
+

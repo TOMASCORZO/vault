@@ -1,0 +1,152 @@
+# RISC Zero Accounting V1 — Research Report
+
+**Measured:** 2026-08-21  
+**Status:** real proof verified end to end; accounting-only and not eligible for
+consensus activation.
+
+## Result
+
+Vault now has a RISC Zero guest that privately proves a strict subset of the
+transfer-v1 statement. The host serializes its cryptographic receipt into the
+existing `ShieldedTransfer.proof` field. `Risc0AccountingVerifier` verifies the
+guest image ID and authenticated journal, then the normal `ShieldedState`
+applies replay, anchor, resource, gas, and atomic-state checks.
+
+The measured example has one private input worth 10,065 atomic VLT and two
+private outputs classified as 10,000 recipient VLT plus 5 change VLT. The guest
+proves:
+
+```text
+burn = ceil(10,000 / 200) = 50
+gas  = 10 units × 1 atomic VLT = 10
+10,065 inputs = 10,000 recipient + 5 change + 50 burn + 10 gas
+```
+
+Only note counts and gas are written to the public journal. Amounts and
+blindings remain private to the prover.
+
+## Measured proof
+
+| Property | Result |
+|---|---:|
+| zkVM | RISC Zero 3.0.6, development mode disabled |
+| Receipt | Composite STARK receipt, bincode encoded |
+| Serialized proof | 256,266 bytes |
+| Consensus maximum | 2,097,152 bytes |
+| Proving time | 175,555 ms |
+| Segments | 1 |
+| Total cycles | 262,144 |
+| User cycles | 138,802 |
+| Guest image / circuit ID | `cbc62eceb28d36d56b9974e446625bdee6a5bc90dba873be3cf16a49c28e14d9` |
+| Public-input digest | `85f459affdf26d6ab297fef4044a648fb4735ea7f228a61165c4c767c87541a1` |
+
+Measurement host: Apple M1 MacBook Air, 8 CPU cores, 8 GB RAM, macOS 26.5.1,
+host Rust 1.96.1, RISC Zero guest Rust 1.97.0. Compilation time is excluded
+from the proving measurement. This canonical run was regenerated after the
+`ruint` and `time` dependency remediations; its image ID supersedes the earlier
+pre-remediation measurement.
+
+The receipt is small enough for the current envelope, but CPU proving latency
+is not acceptable for an interactive base-layer transfer. The backend remains
+useful as an executable specification and a candidate for general private
+programs, remote proving, or later aggregation. Transfer-v1 still needs a
+specialized proof backend and comparative benchmarks.
+
+## Constraints actually proven
+
+1. The guest recomputes the complete transfer-v1 public-input digest from
+   version, chain, circuit, anchor, nullifiers, outputs, ciphertexts,
+   commitments, and gas. The verifier compares that journal digest with the
+   consensus envelope.
+2. Private input and output counts match the public envelope and stay within
+   1..16.
+3. Every sum and multiplication uses checked `u128` arithmetic.
+4. Taxable value is the sum of values classified as recipient outputs.
+5. Burn equals `ceil(taxable / 200)` exactly.
+6. Gas equals public units multiplied by fee per gas.
+7. Input value equals recipient outputs, change outputs, burn, and gas exactly.
+8. Research balance and burn commitments open to the witnessed data using
+   independent 256-bit blindings.
+9. The receipt verifies against one pinned guest image and cannot use RISC
+   Zero development-mode receipts.
+
+The host dependency enables RISC Zero's `disable-dev-mode` feature. Vault also
+rejects any process where `RISC0_DEV_MODE` is present before entering the SDK,
+so a deployment misconfiguration fails closed with an error instead of an SDK
+panic.
+
+## Critical omissions
+
+This proof is not a complete private transfer and must not protect real funds:
+
+- no Merkle membership proof for input notes;
+- no owner key or spending authorization;
+- no derivation of public nullifiers from authenticated notes;
+- no proof that individual public output commitments contain the witnessed
+  values or owners;
+- recipient/change classification is supplied by the prover and is therefore
+  not trustworthy until change ownership is constrained;
+- burn ciphertext is not linked to the witnessed burn and has no threshold
+  encryption yet;
+- BLAKE3 research commitments are neither the final algebraic commitments nor
+  homomorphic;
+- no note encryption, viewing keys, dummy-note indistinguishability, or
+  multi-asset conservation;
+- no protection against IP, timing, wallet, endpoint, or deposit-graph leaks.
+
+The most important current attack is burn evasion by labelling a recipient
+output as change. The production statement must derive internal change from an
+authenticated spender key rather than trusting this classification.
+
+## Reproduction
+
+RISC Zero components are pinned independently:
+
+```text
+risc0-zkvm = 3.0.6
+risc0-build = 3.0.6
+guest Rust = 1.97.0
+experimental host MSRV = 1.90.0
+rzup = 0.5.2 (tooling only)
+```
+
+After installing the pinned guest toolchain, run:
+
+```bash
+./scripts/check-zk-risc0.sh
+./scripts/prove-zk-risc0.sh
+```
+
+The quality script builds and tests the real guest first. It sets
+`RISC0_SKIP_BUILD=1` only during host-side Clippy and rustdoc because Clippy's
+host compiler wrapper cannot compile the nested RISC-V standard library. Proof
+generation never sets that variable.
+
+The experimental backend is an isolated Cargo workspace so its dependency and
+compiler lifecycle cannot silently increase the root protocol MSRV.
+The complete host adapter dependency graph was checked successfully with Rust
+1.90.0 on 2026-08-21; the guest remains compiled by the independently pinned
+RISC Zero Rust 1.97.0 toolchain.
+
+## macOS CPU build patch
+
+The RISC Zero 3.0.6 dependency graph selects `risc0-zkp` 3.0.5 and
+`risc0-sys` 1.5.0. Their published macOS build paths attempt to compile or
+include Metal assets even though the circuit crates select their CPU provers.
+Vault vendors these two Apache-2.0 crates and makes the existing `metal` feature
+control only the Metal build/HAL. CPU kernels, circuits, verifier, proof
+algorithm, constants, and receipt format are unchanged. Each vendor directory
+contains a `VAULT-PATCH.md` audit note.
+
+This is a portability patch, not a security endorsement. It must be dropped
+when upstream resolves the packaging behavior, followed by lockfile review,
+differential tests, and a fresh benchmark.
+
+## Dependency activation blocker
+
+After compatible updates, RustSec still reports vulnerabilities inherited from
+RISC Zero/Arkworks in `rsa` and `tracing-subscriber`, plus unmaintained
+dependencies. The concrete paths, exposure analysis, and no-allowlist policy
+are recorded in
+[`../audits/zk-risc0-dependency-audit-2026-08-21.md`](../audits/zk-risc0-dependency-audit-2026-08-21.md).
+These findings independently prohibit consensus activation.
