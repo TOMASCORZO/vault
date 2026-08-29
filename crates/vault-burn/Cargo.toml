@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+reference-oracle = []
+
 [dependencies]
 blake3.workspace = true
 ff.workspace = true

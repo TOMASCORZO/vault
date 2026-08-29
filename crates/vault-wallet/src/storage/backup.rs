@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Read, Seek, Write},
     path::Path,
     time::Duration,
 };
@@ -40,13 +40,16 @@ const PADDING_CHUNKS: u64 = 16;
 const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 const MAX_CHUNKS: u64 = MAX_SNAPSHOT_BYTES / CHUNK_PLAINTEXT_BYTES as u64;
 const BACKUP_KEY_DOMAIN: &str = "vault.wallet-backup-v1.key.2026-08-23";
+const BACKUP_COPY_DIGEST_DOMAIN: &str = "vault.wallet-backup-v1.copy-digest.2026-08-27";
 
 /// Local completion information for one published backup.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct WalletBackupSummary {
+    backup_id: [u8; 32],
     finalized_height: u64,
     snapshot_bytes: u64,
     backup_bytes: u64,
+    backup_digest: [u8; 32],
 }
 
 impl core::fmt::Debug for WalletBackupSummary {
@@ -56,6 +59,12 @@ impl core::fmt::Debug for WalletBackupSummary {
 }
 
 impl WalletBackupSummary {
+    /// Random public identity of this independently encrypted export.
+    #[must_use]
+    pub const fn backup_id(self) -> [u8; 32] {
+        self.backup_id
+    }
+
     /// Finalized wallet height captured in the snapshot.
     #[must_use]
     pub const fn finalized_height(self) -> u64 {
@@ -72,6 +81,67 @@ impl WalletBackupSummary {
     #[must_use]
     pub const fn backup_bytes(self) -> u64 {
         self.backup_bytes
+    }
+
+    /// Domain-separated digest of the complete published container bytes.
+    #[must_use]
+    pub const fn backup_digest(self) -> [u8; 32] {
+        self.backup_digest
+    }
+
+    /// Checks that a protected copy is byte-identical to this export receipt.
+    ///
+    /// This proves copy identity, not knowledge of the root key. A restore drill
+    /// remains required to authenticate and validate the contained wallet.
+    pub fn verify_copy(self, path: &Path) -> Result<bool, WalletDbError> {
+        protected_parent(path)?;
+        verify_database_file(path)?;
+        let mut input = open_backup_input(path)?;
+        if input
+            .metadata()
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .len()
+            != self.backup_bytes
+        {
+            return Ok(false);
+        }
+        let mut prefix_bytes = [0; PREFIX_BYTES];
+        input
+            .read_exact(&mut prefix_bytes)
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        let prefix = BackupPrefix::parse(&prefix_bytes)?;
+        if prefix.backup_id != self.backup_id {
+            return Ok(false);
+        }
+        input.rewind().map_err(|_| WalletDbError::DatabaseFailure)?;
+        Ok(backup_copy_digest(&mut input)? == self.backup_digest)
+    }
+}
+
+/// Successful full restore-drill evidence for one authenticated backup.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WalletRestoreDrillSummary {
+    finalized_height: u64,
+    restored_database_bytes: u64,
+}
+
+impl core::fmt::Debug for WalletRestoreDrillSummary {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("WalletRestoreDrillSummary(REDACTED)")
+    }
+}
+
+impl WalletRestoreDrillSummary {
+    /// Authenticated finalized height of the restored wallet.
+    #[must_use]
+    pub const fn finalized_height(self) -> u64 {
+        self.finalized_height
+    }
+
+    /// Exact SQLite file length after full validation.
+    #[must_use]
+    pub const fn restored_database_bytes(self) -> u64 {
+        self.restored_database_bytes
     }
 }
 
@@ -312,6 +382,21 @@ fn derive_backup_key(root_key: &[u8; 32], backup_id: &[u8; 32]) -> Zeroizing<[u8
     Zeroizing::new(*hasher.finalize().as_bytes())
 }
 
+fn backup_copy_digest(input: &mut File) -> Result<[u8; 32], WalletDbError> {
+    let mut hasher = Hasher::new_derive_key(BACKUP_COPY_DIGEST_DOMAIN);
+    let mut buffer = vec![0; CHUNK_PLAINTEXT_BYTES];
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(*hasher.finalize().as_bytes())
+}
+
 fn backup_nonce(prefix: [u8; 16], counter: u64) -> [u8; 24] {
     let mut nonce = [0; 24];
     nonce[..16].copy_from_slice(&prefix);
@@ -522,9 +607,11 @@ impl EncryptedWalletDb {
             .prefix(".vault-wallet-backup-")
             .tempfile_in(&parent)
             .map_err(|_| WalletDbError::DatabaseFailure)?;
+        let mut copy_hasher = Hasher::new_derive_key(BACKUP_COPY_DIGEST_DOMAIN);
         output
             .write_all(&encoded_header)
             .map_err(|_| WalletDbError::DatabaseFailure)?;
+        copy_hasher.update(&encoded_header);
         let cipher = XChaCha20Poly1305::new(Key::from_slice(backup_key.as_ref()));
         let mut remaining = snapshot_bytes;
         let mut plaintext = Zeroizing::new(vec![0; CHUNK_PLAINTEXT_BYTES]);
@@ -555,6 +642,7 @@ impl EncryptedWalletDb {
             output
                 .write_all(&ciphertext)
                 .map_err(|_| WalletDbError::DatabaseFailure)?;
+            copy_hasher.update(&ciphertext);
         }
         if remaining != 0 {
             return Err(WalletDbError::DatabaseFailure);
@@ -586,9 +674,11 @@ impl EncryptedWalletDb {
             .map_err(|_| WalletDbError::DatabaseFailure)?;
         sync_parent(&parent)?;
         Ok(WalletBackupSummary {
+            backup_id,
             finalized_height: tip.height(),
             snapshot_bytes,
             backup_bytes: expected_file_bytes,
+            backup_digest: *copy_hasher.finalize().as_bytes(),
         })
     }
 
@@ -685,7 +775,7 @@ impl EncryptedWalletDb {
             .and_then(|_| restored.as_file().sync_all())
             .map_err(|_| WalletDbError::DatabaseFailure)?;
         let restored_path = restored.into_temp_path();
-        let validated = EncryptedWalletDb::open(
+        let validated = EncryptedWalletDb::open_restored_with_legacy_migration(
             restored_path.as_ref(),
             root_key,
             expected_chain_id,
@@ -733,6 +823,46 @@ impl EncryptedWalletDb {
             minimum_finalized_height,
             destination_lock,
         )
+    }
+
+    /// Fully restores and validates a backup in protected disposable storage.
+    ///
+    /// Success means the exact production restore path opened and reconciled
+    /// the database. The temporary database is removed after validation; this
+    /// operation never replaces a live wallet or deletes a backup copy.
+    pub fn drill_backup_restore(
+        backup_path: &Path,
+        scratch_directory: &Path,
+        root_key: &[u8; 32],
+        expected_chain_id: ChainId,
+        expected_wallet_id: [u8; 32],
+        minimum_finalized_height: u64,
+    ) -> Result<WalletRestoreDrillSummary, WalletDbError> {
+        protected_parent(&scratch_directory.join(".vault-wallet-drill-probe"))?;
+        let drill_directory = Builder::new()
+            .prefix(".vault-wallet-restore-drill-")
+            .tempdir_in(scratch_directory)
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        let destination = fs::canonicalize(drill_directory.path())
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .join("wallet.sqlite3");
+        let restored = Self::restore_backup(
+            backup_path,
+            &destination,
+            root_key,
+            expected_chain_id,
+            expected_wallet_id,
+            minimum_finalized_height,
+        )?;
+        let finalized_height = restored.load_tip()?.height();
+        let restored_database_bytes = fs::metadata(&destination)
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .len();
+        drop(restored);
+        Ok(WalletRestoreDrillSummary {
+            finalized_height,
+            restored_database_bytes,
+        })
     }
 }
 

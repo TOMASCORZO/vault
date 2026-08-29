@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{cell::RefCell, fs, path::Path, rc::Rc};
 
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
@@ -15,10 +15,11 @@ use vault_protocol::{
     FinalizedCompactBlockHeader, TransactionId,
 };
 use vault_wallet::{
-    EncryptedWalletDb, FinalizedWalletStore, WalletAccountId, WalletBirthdayCheckpoint,
-    WalletDatabaseConfig, WalletDbError, WalletRecoveryAccounts, WalletRecoveryError,
-    WalletRecoveryPlan, WalletRecoveryStatus, WalletScanAccount, WalletScanError, WalletScanTip,
-    scan_finalized_block,
+    EncryptedWalletDb, FinalizedWalletStore, RollbackProtectedWalletDb, WalletAccountId,
+    WalletBirthdayCheckpoint, WalletDatabaseConfig, WalletDbError, WalletRecoveryAccounts,
+    WalletRecoveryError, WalletRecoveryPlan, WalletRecoveryProductState, WalletRecoveryStatus,
+    WalletRollbackError, WalletRollbackState, WalletScanAccount, WalletScanError, WalletScanTip,
+    WalletSecureRollbackStore, scan_finalized_block,
 };
 
 const NETWORK: [u8; 32] = [0x41; 32];
@@ -29,6 +30,52 @@ const WALLET_ID: [u8; 32] = [0x81; 32];
 const ACCOUNT_ID: [u8; 32] = [0x82; 32];
 const ROOT_KEY: [u8; 32] = [0x91; 32];
 const MAXIMUM_VALUE: u64 = 21_000_000 * 1_000_000_000;
+
+#[derive(Debug)]
+struct TestRollbackStoreError;
+
+impl core::fmt::Display for TestRollbackStoreError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("injected secure store failure")
+    }
+}
+
+impl std::error::Error for TestRollbackStoreError {}
+
+#[derive(Default)]
+struct TestRollbackStoreState {
+    value: Option<WalletRollbackState>,
+    compare_calls: usize,
+    fail_compare_call: Option<usize>,
+}
+
+#[derive(Clone, Default)]
+struct TestRollbackStore(Rc<RefCell<TestRollbackStoreState>>);
+
+impl WalletSecureRollbackStore for TestRollbackStore {
+    type Error = TestRollbackStoreError;
+
+    fn load(&mut self) -> Result<Option<WalletRollbackState>, Self::Error> {
+        Ok(self.0.borrow().value)
+    }
+
+    fn compare_and_swap(
+        &mut self,
+        expected: Option<&WalletRollbackState>,
+        replacement: &WalletRollbackState,
+    ) -> Result<bool, Self::Error> {
+        let mut state = self.0.borrow_mut();
+        state.compare_calls += 1;
+        if state.fail_compare_call == Some(state.compare_calls) {
+            return Err(TestRollbackStoreError);
+        }
+        if state.value.as_ref() != expected {
+            return Ok(false);
+        }
+        state.value = Some(*replacement);
+        Ok(true)
+    }
+}
 
 fn nullifier(byte: u8) -> ActionNullifier {
     ActionNullifier::from_bytes([byte; 32]).unwrap()
@@ -563,6 +610,16 @@ fn verified_birthday_frontier_recovers_future_notes_and_persists_its_origin() {
             gap_limit: 2,
         }
     );
+    let scanning = database.recovery_status().unwrap().product_state();
+    assert_eq!(
+        scanning,
+        WalletRecoveryProductState::Scanning {
+            scanned_height: 1,
+            target_height: 3,
+        }
+    );
+    assert!(!scanning.permits_final_balance());
+    assert!(!scanning.permits_spending());
     let initial_recovery_payload: Vec<u8> = Connection::open(&path)
         .unwrap()
         .query_row(
@@ -677,6 +734,10 @@ fn verified_birthday_frontier_recovers_future_notes_and_persists_its_origin() {
             highest_used_account: Some(0),
         }
     );
+    let ready = database.recovery_status().unwrap().product_state();
+    assert_eq!(ready, WalletRecoveryProductState::Ready);
+    assert!(ready.permits_final_balance());
+    assert!(ready.permits_spending());
     let first_witness = database.witness_for_spend(spend_nullifier).unwrap();
     assert!(first_witness.membership_path().verify(
         first_witness.decrypted().note().commitment().unwrap(),
@@ -918,6 +979,13 @@ fn recovery_target_and_trailing_account_gap_fail_closed() {
         }
     );
     assert_eq!(
+        database.recovery_status().unwrap().product_state(),
+        WalletRecoveryProductState::RestartWithLargerAccountRange {
+            previous_account_count: 2,
+            minimum_account_count: 3,
+        }
+    );
+    assert_eq!(
         database.witness_for_spend(spend_nullifier).unwrap_err(),
         WalletDbError::RecoveryIncomplete
     );
@@ -957,6 +1025,51 @@ fn recovery_target_and_trailing_account_gap_fail_closed() {
 
 #[cfg(unix)]
 #[test]
+fn secure_rollback_protocol_resolves_committed_pending_state_and_detects_rollback() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = database_path(&temp);
+    let old_snapshot = temp.path().join("old-wallet.sqlite3");
+    let tip = initial_tip();
+    let owner = wallet(0xD1);
+    let database = EncryptedWalletDb::create(&path, &ROOT_KEY, config(), tip.clone()).unwrap();
+    let store = TestRollbackStore::default();
+    let observer = store.clone();
+    let mut protected = RollbackProtectedWalletDb::enroll(database, store).unwrap();
+    assert_eq!(protected.rollback_state().stable().height(), 0);
+    assert!(protected.rollback_state().pending().is_none());
+    fs::copy(&path, &old_snapshot).unwrap();
+
+    let account = WalletScanAccount::new(WalletAccountId::from_bytes(ACCOUNT_ID).unwrap(), &owner);
+    let update = scan_finalized_block(&tip, &first_block(&owner, &tip), &[account]).unwrap();
+    observer.0.borrow_mut().fail_compare_call = Some(3);
+    assert!(matches!(
+        protected.commit_finalized_block(update).unwrap_err(),
+        WalletRollbackError::SecureStore(TestRollbackStoreError)
+    ));
+    let prepared = observer.0.borrow().value.unwrap();
+    assert_eq!(prepared.stable().height(), 0);
+    assert_eq!(prepared.pending().unwrap().height(), 1);
+    drop(protected);
+
+    let database =
+        EncryptedWalletDb::open(&path, &ROOT_KEY, ChainId::new(NETWORK), WALLET_ID, 0).unwrap();
+    let recovered = RollbackProtectedWalletDb::open(database, observer.clone()).unwrap();
+    assert_eq!(recovered.load_tip().unwrap().height(), 1);
+    assert_eq!(recovered.rollback_state().stable().height(), 1);
+    assert!(recovered.rollback_state().pending().is_none());
+    drop(recovered);
+
+    fs::copy(&old_snapshot, &path).unwrap();
+    let rolled_back =
+        EncryptedWalletDb::open(&path, &ROOT_KEY, ChainId::new(NETWORK), WALLET_ID, 0).unwrap();
+    assert!(matches!(
+        RollbackProtectedWalletDb::open(rolled_back, observer).unwrap_err(),
+        WalletRollbackError::RollbackDetected
+    ));
+}
+
+#[cfg(unix)]
+#[test]
 fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite() {
     let temp = tempfile::tempdir().unwrap();
     let directory = fs::canonicalize(temp.path()).unwrap();
@@ -977,6 +1090,8 @@ fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite()
     let summary = source.export_backup(&backup_path, &ROOT_KEY).unwrap();
     assert_eq!(summary.finalized_height(), 1);
     assert_eq!(format!("{summary:?}"), "WalletBackupSummary(REDACTED)");
+    assert_ne!(summary.backup_id(), [0; 32]);
+    assert_ne!(summary.backup_digest(), [0; 32]);
     assert!(summary.snapshot_bytes() > 0);
     assert_eq!(
         summary.backup_bytes(),
@@ -984,6 +1099,39 @@ fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite()
     );
     assert_eq!(summary.backup_bytes(), 1_049_104);
     assert_eq!(fs::metadata(&backup_path).unwrap().mode() & 0o777, 0o600);
+    assert!(summary.verify_copy(&backup_path).unwrap());
+
+    let copied_path = directory.join("wallet-copy.vwb");
+    fs::copy(&backup_path, &copied_path).unwrap();
+    fs::set_permissions(&copied_path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(summary.verify_copy(&copied_path).unwrap());
+    let mut damaged_copy = fs::read(&copied_path).unwrap();
+    let last_copy_byte = damaged_copy.len() - 1;
+    damaged_copy[last_copy_byte] ^= 1;
+    fs::write(&copied_path, damaged_copy).unwrap();
+    assert!(!summary.verify_copy(&copied_path).unwrap());
+
+    let drill = EncryptedWalletDb::drill_backup_restore(
+        &backup_path,
+        &directory,
+        &ROOT_KEY,
+        ChainId::new(NETWORK),
+        WALLET_ID,
+        1,
+    )
+    .unwrap();
+    assert_eq!(format!("{drill:?}"), "WalletRestoreDrillSummary(REDACTED)");
+    assert_eq!(drill.finalized_height(), 1);
+    assert_eq!(drill.restored_database_bytes(), summary.snapshot_bytes());
+
+    let compaction = source.compact().unwrap();
+    assert_eq!(
+        format!("{compaction:?}"),
+        "WalletCompactionSummary(REDACTED)"
+    );
+    assert!(compaction.after_bytes() <= compaction.before_bytes());
+    assert!(compaction.after_pages() <= compaction.before_pages());
+    assert!(source.witness_for_spend(external_nullifier).is_ok());
 
     let backup_bytes = fs::read(&backup_path).unwrap();
     assert_eq!(&backup_bytes[..4], b"VWB1");

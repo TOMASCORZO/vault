@@ -4,15 +4,20 @@ use blake3::Hasher;
 use rand_core::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 use vault_privacy::{
-    OUTPUT_AUTHORIZATION_PACKET_BYTES, OutputAuthorizationIntent, OutputAuthorizationPacket,
-    PreparedSpendAuthorization, SpendAuthorization, SpendAuthorizationDigest, VaultFullViewingKey,
-    VaultSpendingKey, VerifiedOutputAuthorization,
+    OUTPUT_AUTHORIZATION_PACKET_BYTES, OutputAuthorizationPacket, PreparedSpendAuthorization,
+    SpendAuthorization, SpendAuthorizationDigest, VaultFullViewingKey, VaultSpendingKey,
+    VerifiedOutputAuthorization,
 };
 use vault_protocol::{
     ProtocolError, PublicInputDigest, TRANSFER_V2_MAX_EFFECT_BYTES, TransferV2Effects,
     TransferV2SignerPolicy,
 };
 use zeroize::{Zeroize, Zeroizing};
+
+use crate::{
+    MultisigCommitmentSet, MultisigPolicy, MultisigSigningAgreement, TransferConfirmationFacts,
+    TrustedTransferIntentSource,
+};
 
 const CHALLENGE_MAGIC: [u8; 4] = *b"VSCH";
 const CHALLENGE_VERSION: u16 = 1;
@@ -54,12 +59,16 @@ pub enum SessionError {
     PolicyMismatch,
     /// Trusted user intents do not cover the exact action count.
     IntentCountMismatch { expected: usize, actual: usize },
+    /// Trusted confirmation rejected, failed, or returned invalid intent.
+    ConfirmationFailed,
     /// A private output packet failed independent reconstruction.
     InvalidOutputAuthorization,
     /// Response framing, transcript, effects digest, or signature is invalid.
     InvalidResponse,
     /// Requested action was already signed in this one-shot session.
     ActionAlreadySigned { index: usize },
+    /// Multisig agreement differs from the prepared transaction or action key.
+    InvalidMultisigAgreement,
     /// Not every action has been authorized, so the session cannot finish.
     IncompleteSession,
     /// The underlying transfer-v2 policy or signature validation failed.
@@ -78,9 +87,11 @@ impl fmt::Display for SessionError {
             Self::InvalidRequest => "invalid signer authorization request",
             Self::PolicyMismatch => "signer request policy mismatch",
             Self::IntentCountMismatch { .. } => "signer intent count mismatch",
+            Self::ConfirmationFailed => "trusted signer confirmation failed",
             Self::InvalidOutputAuthorization => "signer output reconstruction failed",
             Self::InvalidResponse => "invalid signer authorization response",
             Self::ActionAlreadySigned { .. } => "signer action was already authorized",
+            Self::InvalidMultisigAgreement => "invalid multisig signing agreement",
             Self::IncompleteSession => "signer session is incomplete",
             Self::Protocol(_) => "transfer-v2 signer policy rejected the request",
         };
@@ -419,6 +430,12 @@ pub trait DurableReplayGuard {
 pub struct SigningTranscriptId([u8; 32]);
 
 impl SigningTranscriptId {
+    /// Restores exact transcript bytes carried by a canonical nested protocol.
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     /// Exact transcript bytes.
     #[must_use]
     pub const fn to_bytes(self) -> [u8; 32] {
@@ -449,40 +466,71 @@ impl BoundTransferV2SigningSession {
     /// local policy, trusted intents and reconstructed packets before consuming
     /// durable replay state.
     #[allow(clippy::too_many_arguments)]
-    pub fn prepare_request<G: DurableReplayGuard>(
+    pub fn prepare_confirmed_request<G, C>(
         expected_channel_binding: [u8; 32],
         issued_challenge: &SessionChallenge,
         replay_guard: &mut G,
         policy: &TransferV2SignerPolicy,
         request: SignerAuthorizationRequest,
         full_viewing_key: &VaultFullViewingKey,
-        intents: &[OutputAuthorizationIntent],
+        confirmation: &mut C,
         maximum_value: u64,
-    ) -> Result<Self, SessionError> {
+    ) -> Result<Self, SessionError>
+    where
+        G: DurableReplayGuard,
+        C: TrustedTransferIntentSource,
+    {
         let issued = issued_challenge.encode();
         let echoed = request.challenge.encode();
         if !bool::from(issued[..].ct_eq(&echoed[..])) {
             return Err(SessionError::InvalidChallenge);
         }
+        if issued_challenge.channel_binding != expected_channel_binding {
+            return Err(SessionError::ChannelBindingMismatch);
+        }
+        if issued_challenge.network_id != *request.effects.chain_id().as_bytes() {
+            return Err(SessionError::NetworkMismatch);
+        }
         if request.policy_digest != policy.signer_policy_digest() {
             return Err(SessionError::PolicyMismatch);
         }
-        if intents.len() != request.effects.actions().len() {
+        policy.validate_effects(&request.effects)?;
+        let gas = request.effects.gas();
+        let facts = TransferConfirmationFacts::new(
+            *request.effects.chain_id().as_bytes(),
+            *request.effects.circuit_id().as_bytes(),
+            request.effects.burn().scheme_id(),
+            request.effects.burn().key_id(),
+            request.effects.burn().epoch(),
+            request.effects.actions().len(),
+            gas.units,
+            gas.fee_per_gas,
+            gas.total_fee()?,
+            request.effects.public_inputs_digest(),
+            request.transcript_id(),
+        );
+        let approved = confirmation
+            .confirm_transfer(&facts)
+            .map_err(|_| SessionError::ConfirmationFailed)?;
+        if approved.len() != request.effects.actions().len() {
             return Err(SessionError::IntentCountMismatch {
                 expected: request.effects.actions().len(),
-                actual: intents.len(),
+                actual: approved.len(),
             });
         }
         let mut output_authorizations = Vec::with_capacity(request.packets.len());
-        for ((packet, intent), action) in request
+        for ((packet, approved), action) in request
             .packets
             .iter()
-            .zip(intents)
+            .zip(&approved)
             .zip(request.effects.actions())
         {
+            let intent = approved
+                .bind(*request.effects.chain_id().as_bytes(), action.nullifier())
+                .map_err(|_| SessionError::ConfirmationFailed)?;
             output_authorizations.push(
                 packet
-                    .verify(full_viewing_key, intent, action.output(), maximum_value)
+                    .verify(full_viewing_key, &intent, action.output(), maximum_value)
                     .map_err(|_| SessionError::InvalidOutputAuthorization)?,
             );
         }
@@ -498,7 +546,7 @@ impl BoundTransferV2SigningSession {
 
     /// Validates the exact channel/network binding, complete signer policy and
     /// ordered packet set, then atomically consumes replay state.
-    pub fn prepare<G: DurableReplayGuard>(
+    pub(crate) fn prepare<G: DurableReplayGuard>(
         expected_channel_binding: [u8; 32],
         challenge: &SessionChallenge,
         replay_guard: &mut G,
@@ -538,6 +586,73 @@ impl BoundTransferV2SigningSession {
     #[must_use]
     pub const fn transcript_id(&self) -> SigningTranscriptId {
         self.transcript_id
+    }
+
+    /// Freezes one exact action-specific multisig agreement after the complete
+    /// transfer request has passed the same policy/output/replay checks as a
+    /// single-signer session.
+    pub fn multisig_agreement(
+        &self,
+        action_index: usize,
+        policy: &MultisigPolicy,
+        commitments: &MultisigCommitmentSet,
+        prepared: &PreparedSpendAuthorization,
+    ) -> Result<MultisigSigningAgreement, SessionError> {
+        let expected_key = self.inner.randomized_validating_key(action_index)?;
+        if prepared.randomized_verification_key() != expected_key.to_bytes() {
+            return Err(SessionError::InvalidMultisigAgreement);
+        }
+        let agreement = MultisigSigningAgreement::new(
+            policy,
+            commitments,
+            self.transcript_id,
+            self.inner.public_inputs_digest(),
+            action_index,
+            self.inner.action_count(),
+            prepared,
+        )
+        .map_err(|_| SessionError::InvalidMultisigAgreement)?;
+        if agreement.authorization_digest() != self.inner.authorization_digest() {
+            return Err(SessionError::InvalidMultisigAgreement);
+        }
+        Ok(agreement)
+    }
+
+    /// Attaches a reviewed adapter's final aggregated RedPallas signature only
+    /// when its complete agreement and proof-bound action key match this session.
+    pub fn attach_multisig_authorization(
+        &mut self,
+        agreement: &MultisigSigningAgreement,
+        authorization: SpendAuthorization,
+    ) -> Result<(), SessionError> {
+        let action_index = agreement.action_index();
+        let slot = self.authorizations.get(action_index).ok_or({
+            ProtocolError::InvalidAuthorizationIndex {
+                index: action_index,
+                action_count: self.authorizations.len(),
+            }
+        })?;
+        if slot.is_some() {
+            return Err(SessionError::ActionAlreadySigned {
+                index: action_index,
+            });
+        }
+        if agreement.transcript_id() != self.transcript_id
+            || agreement.action_count() != self.inner.action_count()
+            || agreement.public_inputs_digest() != self.inner.public_inputs_digest()
+            || agreement.authorization_digest() != self.inner.authorization_digest()
+            || agreement.randomized_validating_key()
+                != self
+                    .inner
+                    .randomized_validating_key(action_index)?
+                    .to_bytes()
+        {
+            return Err(SessionError::InvalidMultisigAgreement);
+        }
+        self.inner
+            .validate_action_authorization(action_index, &authorization)?;
+        self.authorizations[action_index] = Some(authorization);
+        Ok(())
     }
 
     /// Signs one action at most once in this session.

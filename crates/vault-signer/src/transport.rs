@@ -1,4 +1,5 @@
 use core::fmt;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rand_core::{CryptoRng, RngCore};
 use snow::{Builder, HandshakeState, TransportState, params::NoiseParams};
@@ -20,6 +21,42 @@ pub const MAX_SIGNER_PLAINTEXT_BYTES: usize = 60 * 1024;
 pub const MAX_SIGNER_MESSAGE_BYTES: usize = MAX_SIGNER_PLAINTEXT_BYTES - FRAME_HEADER_BYTES;
 
 const PROLOGUE_DOMAIN: &[u8] = b"vault.signer.noise-kk.prologue.v1";
+
+/// Shared in-memory lifecycle gate installed by the durable peer registry.
+///
+/// Holding the mutex across one Noise operation makes registry shutdown wait
+/// for an operation already in flight and prevents a new operation from
+/// crossing a committed revocation boundary.
+pub(crate) struct SignerSessionGate {
+    active: Mutex<bool>,
+}
+
+impl SignerSessionGate {
+    pub(crate) fn new(active: bool) -> Arc<Self> {
+        Arc::new(Self {
+            active: Mutex::new(active),
+        })
+    }
+
+    fn lock_active(&self) -> Result<MutexGuard<'_, bool>, SignerTransportError> {
+        let guard = self
+            .active
+            .lock()
+            .map_err(|_| SignerTransportError::Closed)?;
+        if *guard {
+            Ok(guard)
+        } else {
+            Err(SignerTransportError::Closed)
+        }
+    }
+
+    pub(crate) fn shut_down(&self) {
+        match self.active.lock() {
+            Ok(mut active) => *active = false,
+            Err(poisoned) => *poisoned.into_inner() = false,
+        }
+    }
+}
 
 /// Fail-closed signer transport error. Cryptographic failures are deliberately
 /// opaque at the application boundary.
@@ -117,6 +154,7 @@ impl SignerTransportKeyPair {
 pub struct SignerHandshake {
     state: HandshakeState,
     failed: bool,
+    session_gate: Option<Arc<SignerSessionGate>>,
 }
 
 impl fmt::Debug for SignerHandshake {
@@ -154,6 +192,16 @@ impl SignerHandshake {
         network_id: [u8; 32],
         initiator: bool,
     ) -> Result<Self, SignerTransportError> {
+        Self::new_with_vector_ephemeral(local, remote_public, network_id, initiator, None)
+    }
+
+    fn new_with_vector_ephemeral(
+        local: &SignerTransportKeyPair,
+        remote_public: [u8; 32],
+        network_id: [u8; 32],
+        initiator: bool,
+        vector_ephemeral: Option<&[u8; 32]>,
+    ) -> Result<Self, SignerTransportError> {
         if network_id == [0; 32] || remote_public == [0; 32] || remote_public == local.public {
             return Err(SignerTransportError::InvalidConfiguration);
         }
@@ -168,20 +216,66 @@ impl SignerHandshake {
             .map_err(|_| SignerTransportError::InvalidConfiguration)?
             .prologue(&prologue)
             .map_err(|_| SignerTransportError::InvalidConfiguration)?;
-        let state = if initiator {
-            builder.build_initiator()
-        } else {
-            builder.build_responder()
+        let state = match (initiator, vector_ephemeral) {
+            (true, Some(ephemeral)) => builder
+                .fixed_ephemeral_key_for_testing_only(ephemeral)
+                .build_initiator(),
+            (false, Some(ephemeral)) => builder
+                .fixed_ephemeral_key_for_testing_only(ephemeral)
+                .build_responder(),
+            (true, None) => builder.build_initiator(),
+            (false, None) => builder.build_responder(),
         }
         .map_err(|_| SignerTransportError::InvalidConfiguration)?;
         Ok(Self {
             state,
             failed: false,
+            session_gate: None,
         })
+    }
+
+    /// Deterministic initiator used only by the committed synthetic corpus.
+    #[cfg(feature = "test-vector-generation")]
+    #[doc(hidden)]
+    pub fn deterministic_vector_initiator(
+        local: &SignerTransportKeyPair,
+        remote_public: [u8; 32],
+        network_id: [u8; 32],
+        ephemeral: &[u8; 32],
+    ) -> Result<Self, SignerTransportError> {
+        Self::new_with_vector_ephemeral(local, remote_public, network_id, true, Some(ephemeral))
+    }
+
+    /// Deterministic responder used only by the committed synthetic corpus.
+    #[cfg(feature = "test-vector-generation")]
+    #[doc(hidden)]
+    pub fn deterministic_vector_responder(
+        local: &SignerTransportKeyPair,
+        remote_public: [u8; 32],
+        network_id: [u8; 32],
+        ephemeral: &[u8; 32],
+    ) -> Result<Self, SignerTransportError> {
+        Self::new_with_vector_ephemeral(local, remote_public, network_id, false, Some(ephemeral))
+    }
+
+    pub(crate) fn bind_session_gate(mut self, session_gate: Arc<SignerSessionGate>) -> Self {
+        self.session_gate = Some(session_gate);
+        self
     }
 
     /// Writes the next fixed empty-payload handshake flight.
     pub fn write_message(&mut self) -> Result<Vec<u8>, SignerTransportError> {
+        let session_gate = self.session_gate.clone();
+        let _session_guard = match session_gate.as_ref() {
+            Some(gate) => match gate.lock_active() {
+                Ok(guard) => Some(guard),
+                Err(error) => {
+                    self.failed = true;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         if self.failed || self.state.is_handshake_finished() || !self.state.is_my_turn() {
             return Err(SignerTransportError::HandshakeFailed);
         }
@@ -200,6 +294,17 @@ impl SignerHandshake {
     /// Authenticates and consumes the next handshake flight. Handshake payloads
     /// are forbidden so negotiation cannot silently alter this profile.
     pub fn read_message(&mut self, message: &[u8]) -> Result<(), SignerTransportError> {
+        let session_gate = self.session_gate.clone();
+        let _session_guard = match session_gate.as_ref() {
+            Some(gate) => match gate.lock_active() {
+                Ok(guard) => Some(guard),
+                Err(error) => {
+                    self.failed = true;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         if self.failed || self.state.is_handshake_finished() || self.state.is_my_turn() {
             return Err(SignerTransportError::HandshakeFailed);
         }
@@ -221,6 +326,9 @@ impl SignerHandshake {
     /// Converts a completed handshake into a bounded ordered transport and
     /// retains the Noise handshake hash as its channel binding.
     pub fn into_transport(self) -> Result<SignerTransport, SignerTransportError> {
+        if let Some(gate) = &self.session_gate {
+            drop(gate.lock_active()?);
+        }
         if self.failed || !self.state.is_handshake_finished() {
             return Err(SignerTransportError::HandshakeFailed);
         }
@@ -239,6 +347,7 @@ impl SignerHandshake {
             send_sequence: 0,
             receive_sequence: 0,
             closed: false,
+            session_gate: self.session_gate,
         })
     }
 }
@@ -304,6 +413,7 @@ pub struct SignerTransport {
     send_sequence: u64,
     receive_sequence: u64,
     closed: bool,
+    session_gate: Option<Arc<SignerSessionGate>>,
 }
 
 impl fmt::Debug for SignerTransport {
@@ -334,6 +444,17 @@ impl SignerTransport {
             self.closed = true;
             return Err(SignerTransportError::Closed);
         }
+        let session_gate = self.session_gate.clone();
+        let _session_guard = match session_gate.as_ref() {
+            Some(gate) => match gate.lock_active() {
+                Ok(guard) => Some(guard),
+                Err(error) => {
+                    self.closed = true;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         if payload.len() > MAX_SIGNER_MESSAGE_BYTES {
             return Err(SignerTransportError::MessageTooLarge);
         }
@@ -369,6 +490,17 @@ impl SignerTransport {
             self.closed = true;
             return Err(SignerTransportError::Closed);
         }
+        let session_gate = self.session_gate.clone();
+        let _session_guard = match session_gate.as_ref() {
+            Some(gate) => match gate.lock_active() {
+                Ok(guard) => Some(guard),
+                Err(error) => {
+                    self.closed = true;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         if ciphertext.len() > MAX_SIGNER_PLAINTEXT_BYTES + NOISE_TAG_BYTES
             || ciphertext.len() < FRAME_HEADER_BYTES + NOISE_TAG_BYTES
         {

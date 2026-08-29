@@ -40,7 +40,11 @@ mod tree;
 
 #[cfg(feature = "circuit")]
 pub mod circuit;
+#[cfg(feature = "reference-oracle")]
+pub mod reference;
 
+#[cfg(feature = "reference-oracle")]
+pub use signing::ReferenceOutputWitness;
 pub use signing::{
     OUTPUT_AUTHORIZATION_PACKET_BYTES, OutputAuthorizationError, OutputAuthorizationIntent,
     OutputAuthorizationPacket, OutputKind, VerifiedOutputAuthorization,
@@ -375,6 +379,29 @@ impl fmt::Debug for PreparedSpendAuthorization {
 }
 
 impl PreparedSpendAuthorization {
+    /// Reconstructs and validates the exact private `alpha` supplied to a
+    /// reviewed proving adapter.
+    #[cfg(feature = "circuit")]
+    pub fn from_proving_witness(
+        group_validating_key: [u8; 32],
+        randomized_verification_key: [u8; 32],
+        mut randomizer: [u8; 32],
+    ) -> Result<Self, PrivacyError> {
+        RandomizedSpendValidatingKey::from_bytes(randomized_verification_key)?;
+        if parse_nonzero_scalar(&randomizer).is_err() {
+            randomizer.zeroize();
+            return Err(PrivacyError::InvalidAuthorizationRandomizer);
+        }
+        let authorization = Self {
+            randomized_verification_key,
+            randomizer: Zeroizing::new(randomizer),
+        };
+        if !authorization.matches_group_validating_key(group_validating_key) {
+            return Err(PrivacyError::InvalidSpendAuthorization);
+        }
+        Ok(authorization)
+    }
+
     /// Public randomized validating key bound inside the transfer proof.
     #[must_use]
     pub const fn randomized_verification_key(&self) -> [u8; 32] {
@@ -385,6 +412,27 @@ impl PreparedSpendAuthorization {
     #[must_use]
     pub fn randomizer(&self) -> Zeroizing<[u8; 32]> {
         Zeroizing::new(*self.randomizer)
+    }
+
+    /// Checks that this proof witness randomizes one exact RedPallas group key
+    /// to the public key already bound inside the transfer action.
+    ///
+    /// Threshold-signing adapters use this before any nonce commitment is
+    /// exposed. It performs no FROST round and reveals no randomizer bytes.
+    #[must_use]
+    pub fn matches_group_validating_key(&self, group_key: [u8; 32]) -> bool {
+        let Ok(group_key) = redpallas::VerificationKey::<SpendAuth>::try_from(group_key) else {
+            return false;
+        };
+        if group_key.is_identity() {
+            return false;
+        }
+        let Ok(randomizer) = parse_nonzero_scalar(&self.randomizer) else {
+            return false;
+        };
+        let randomized = group_key.randomize(&randomizer);
+        let randomized_bytes: [u8; 32] = (&randomized).into();
+        randomized_bytes == self.randomized_verification_key
     }
 }
 
@@ -543,6 +591,17 @@ impl VaultFullViewingKey {
         VaultOutgoingViewingKey(Zeroizing::new(
             *self.orchard().to_ovk(scope.into()).as_ref(),
         ))
+    }
+
+    /// Canonical account-level RedPallas spend validating key.
+    ///
+    /// This is public account metadata. A threshold wallet binds its FROST
+    /// public package to these exact bytes before deriving any action key.
+    #[must_use]
+    pub fn spend_validating_key(&self) -> [u8; 32] {
+        let validating_key = SpendValidatingKey::from(self.orchard());
+        let point = pallas::Point::from(&validating_key);
+        point.to_bytes()
     }
 
     /// Derives the unique public nullifier for a note owned by this account.
@@ -1141,6 +1200,45 @@ impl Drop for PreparedBurnCommitment {
 }
 
 impl PreparedBurnCommitment {
+    /// Reconstructs an exact circuit-compatible burn opening from a private
+    /// delegated-proving witness and checks its public commitment.
+    #[cfg(feature = "circuit")]
+    pub fn from_proving_witness(
+        amount: u64,
+        maximum_amount: u64,
+        mut trapdoor_bytes: [u8; 32],
+        expected_commitment: CanonicalValueCommitment,
+    ) -> Result<Self, PrivacyError> {
+        if amount > maximum_amount {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::NoteValueOutOfRange);
+        }
+        if trapdoor_bytes == [0; 32] {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::InvalidValueCommitment);
+        }
+        let base = Option::<pallas::Base>::from(pallas::Base::from_repr(trapdoor_bytes));
+        let trapdoor =
+            Option::<ValueCommitTrapdoor>::from(ValueCommitTrapdoor::from_bytes(trapdoor_bytes));
+        let Some(trapdoor) = trapdoor.filter(|_| base.is_some()) else {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::InvalidValueCommitment);
+        };
+        let commitment = CanonicalValueCommitment::from_bytes(
+            ValueCommitment::derive(NoteValue::from_raw(amount) - NoteValue::ZERO, trapdoor)
+                .to_bytes(),
+        )?;
+        if commitment != expected_commitment || commitment.is_identity() {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::InvalidValueCommitment);
+        }
+        Ok(Self {
+            amount,
+            commitment,
+            trapdoor: Zeroizing::new(trapdoor_bytes),
+        })
+    }
+
     /// Commits to one bounded burn amount with a circuit-compatible non-zero
     /// trapdoor. Identity commitments are resampled.
     pub fn create<R: RngCore + CryptoRng>(
@@ -1199,6 +1297,42 @@ impl fmt::Debug for PreparedNetValueCommitment {
 }
 
 impl PreparedNetValueCommitment {
+    /// Reconstructs one exact `rcv` witness and checks the public net-value
+    /// commitment before a delegated prover may synthesize the circuit.
+    #[cfg(feature = "circuit")]
+    pub fn from_proving_witness(
+        input_value: u64,
+        output_value: u64,
+        mut trapdoor_bytes: [u8; 32],
+        expected_commitment: CanonicalValueCommitment,
+    ) -> Result<Self, PrivacyError> {
+        if trapdoor_bytes == [0; 32] {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::InvalidValueCommitment);
+        }
+        let Some(trapdoor) =
+            Option::<ValueCommitTrapdoor>::from(ValueCommitTrapdoor::from_bytes(trapdoor_bytes))
+        else {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::InvalidValueCommitment);
+        };
+        let commitment = CanonicalValueCommitment::from_bytes(
+            ValueCommitment::derive(
+                NoteValue::from_raw(input_value) - NoteValue::from_raw(output_value),
+                trapdoor,
+            )
+            .to_bytes(),
+        )?;
+        if commitment != expected_commitment {
+            trapdoor_bytes.zeroize();
+            return Err(PrivacyError::InvalidValueCommitment);
+        }
+        Ok(Self {
+            commitment,
+            trapdoor: Zeroizing::new(trapdoor_bytes),
+        })
+    }
+
     /// Commits to the signed difference between one input and one output note.
     pub fn create<R: RngCore + CryptoRng>(
         input_value: u64,

@@ -4,12 +4,46 @@ use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 use tempfile::tempdir;
 use vault_signer::{
     ENCRYPTED_PEER_REGISTRY_BYTES, EncryptedPeerRegistry, MAX_ACTIVE_PAIRED_SIGNERS,
-    PairedPeerState, PairedSignerRecord, PeerRegistryError, PeerRegistryId, PeerRegistryScope,
-    PeerRegistryStorageKey, SignerHandshake, SignerPairingHandshake, SignerPairingRole,
-    SignerTransportKeyPair, SignerTransportMessageKind, UnconfirmedSignerPairing,
+    PairedPeerState, PairedSignerRecord, PairingConfirmationFacts, PairingFingerprint,
+    PeerLifecycleAction, PeerLifecycleConfirmationFacts, PeerRegistryError, PeerRegistryId,
+    PeerRegistryScope, PeerRegistryStorageKey, SignerConfirmationError, SignerHandshake,
+    SignerPairingHandshake, SignerPairingRole, SignerTransportError, SignerTransportKeyPair,
+    SignerTransportMessageKind, TrustedPairingConfirmation, TrustedPeerConfirmation,
+    UnconfirmedSignerPairing,
 };
 
 const NETWORK: [u8; 32] = [0x31; 32];
+
+#[derive(Default)]
+struct RecordingPeerConfirmation {
+    facts: Vec<PeerLifecycleConfirmationFacts>,
+    reject: bool,
+}
+
+impl TrustedPeerConfirmation for RecordingPeerConfirmation {
+    fn confirm_peer_lifecycle(
+        &mut self,
+        facts: &PeerLifecycleConfirmationFacts,
+    ) -> Result<(), SignerConfirmationError> {
+        self.facts.push(*facts);
+        if self.reject {
+            Err(SignerConfirmationError::Rejected)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct TestPairingConfirmation(PairingFingerprint);
+
+impl TrustedPairingConfirmation for TestPairingConfirmation {
+    fn confirm_pairing(
+        &mut self,
+        _facts: &PairingConfirmationFacts,
+    ) -> Result<PairingFingerprint, SignerConfirmationError> {
+        Ok(self.0)
+    }
+}
 
 fn registry_id() -> PeerRegistryId {
     PeerRegistryId::from_bytes([0x61; 32]).unwrap()
@@ -40,8 +74,12 @@ fn confirmed_pairing(
     let fingerprint = coordinator.fingerprint();
     assert_eq!(fingerprint, signer.fingerprint());
     (
-        coordinator.confirm(fingerprint).unwrap(),
-        signer.confirm(fingerprint).unwrap(),
+        coordinator
+            .confirm(&mut TestPairingConfirmation(fingerprint))
+            .unwrap(),
+        signer
+            .confirm(&mut TestPairingConfirmation(fingerprint))
+            .unwrap(),
     )
 }
 
@@ -163,9 +201,46 @@ fn only_active_registry_entries_can_open_the_paired_kk_channel() {
         .unwrap();
     assert_eq!(signer.read_message(&encrypted).unwrap().payload, b"active");
 
-    registry.revoke(peer_id, &mut rng).unwrap();
+    let mut rejected = RecordingPeerConfirmation {
+        reject: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        registry.revoke_confirmed(peer_id, &mut rejected, &mut rng),
+        Err(PeerRegistryError::ConfirmationFailed)
+    );
+    assert_eq!(registry.generation(), 2);
+    let still_active = coordinator
+        .write_message(SignerTransportMessageKind::Abort, b"still-active")
+        .unwrap();
+    assert_eq!(
+        signer.read_message(&still_active).unwrap().payload,
+        b"still-active"
+    );
+
+    let mut confirmed = RecordingPeerConfirmation::default();
+    registry
+        .revoke_confirmed(peer_id, &mut confirmed, &mut rng)
+        .unwrap();
+    assert_eq!(confirmed.facts.len(), 1);
+    assert_eq!(confirmed.facts[0].action(), PeerLifecycleAction::Revoke);
+    assert_eq!(confirmed.facts[0].network_id(), NETWORK);
+    assert_eq!(
+        confirmed.facts[0].local_role(),
+        SignerPairingRole::Coordinator
+    );
+    assert_eq!(confirmed.facts[0].peer_id(), peer_id);
+    assert_eq!(confirmed.facts[0].current_fingerprint(), fingerprint);
+    assert_eq!(confirmed.facts[0].replacement_fingerprint(), None);
+    assert_eq!(confirmed.facts[0].current_generation(), 2);
     assert_eq!(registry.generation(), 3);
     assert_eq!(registry.peers()[0].state(), PairedPeerState::Revoked);
+    assert_eq!(
+        coordinator
+            .write_message(SignerTransportMessageKind::Abort, b"revoked")
+            .unwrap_err(),
+        SignerTransportError::Closed
+    );
     assert_eq!(
         registry
             .open_handshake(peer_id, &coordinator_key)
@@ -173,7 +248,7 @@ fn only_active_registry_entries_can_open_the_paired_kk_channel() {
         PeerRegistryError::PeerRevoked
     );
     assert_eq!(
-        registry.revoke(peer_id, &mut rng),
+        registry.revoke_confirmed(peer_id, &mut confirmed, &mut rng),
         Err(PeerRegistryError::PeerRevoked)
     );
     assert_eq!(
@@ -205,12 +280,45 @@ fn rotation_tombstones_old_peer_and_installs_fresh_identity_atomically() {
         registry_id(),
     )
     .unwrap();
-    let (first_record, _) = confirmed_pairing(&coordinator_key, &first_signer_key, NETWORK);
+    let (first_record, first_signer_record) =
+        confirmed_pairing(&coordinator_key, &first_signer_key, NETWORK);
     let (replacement, replacement_signer_record) =
         confirmed_pairing(&coordinator_key, &second_signer_key, NETWORK);
     let mut registry = EncryptedPeerRegistry::create(&path, &storage_key, scope, &mut rng).unwrap();
     let first_id = registry.add_confirmed(first_record, &mut rng).unwrap();
-    let replacement_id = registry.rotate(first_id, replacement, &mut rng).unwrap();
+    let mut old_coordinator = registry.open_handshake(first_id, &coordinator_key).unwrap();
+    let mut old_signer = registered_handshake(
+        &directory.path().join("first-signer-peers.vpse"),
+        first_signer_record,
+        &first_signer_key,
+        &mut rng,
+    );
+    let first = old_coordinator.write_message().unwrap();
+    old_signer.read_message(&first).unwrap();
+    let second = old_signer.write_message().unwrap();
+    old_coordinator.read_message(&second).unwrap();
+    let mut old_coordinator = old_coordinator.into_transport().unwrap();
+    let _old_signer = old_signer.into_transport().unwrap();
+    let mut confirmation = RecordingPeerConfirmation::default();
+    let replacement_id = registry
+        .rotate_confirmed(first_id, replacement, &mut confirmation, &mut rng)
+        .unwrap();
+
+    assert_eq!(confirmation.facts.len(), 1);
+    assert_eq!(confirmation.facts[0].action(), PeerLifecycleAction::Rotate);
+    assert_eq!(confirmation.facts[0].peer_id(), first_id);
+    assert_eq!(confirmation.facts[0].current_generation(), 2);
+    assert_eq!(
+        confirmation.facts[0].replacement_fingerprint(),
+        Some(replacement_signer_record.fingerprint())
+    );
+
+    assert_eq!(
+        old_coordinator
+            .write_message(SignerTransportMessageKind::Abort, b"rotated")
+            .unwrap_err(),
+        SignerTransportError::Closed
+    );
 
     assert_eq!(registry.generation(), 3);
     let old = registry
@@ -390,12 +498,36 @@ fn duplicate_owner_scope_capacity_locking_and_io_failure_are_enforced() {
     fs::create_dir(&live_parent).unwrap();
     let failing_path = live_parent.join("peers.vpse");
     let mut failing = EncryptedPeerRegistry::create(&failing_path, &key, scope, &mut rng).unwrap();
+    let established_remote = SignerTransportKeyPair::generate(&mut rng);
+    let (established_record, established_remote_record) =
+        confirmed_pairing(&local, &established_remote, NETWORK);
+    let established_id = failing.add_confirmed(established_record, &mut rng).unwrap();
+    let mut established_local = failing.open_handshake(established_id, &local).unwrap();
+    let mut established_signer = registered_handshake(
+        &directory.path().join("failing-remote-peers.vpse"),
+        established_remote_record,
+        &established_remote,
+        &mut rng,
+    );
+    let first = established_local.write_message().unwrap();
+    established_signer.read_message(&first).unwrap();
+    let second = established_signer.write_message().unwrap();
+    established_local.read_message(&second).unwrap();
+    let mut established_local = established_local.into_transport().unwrap();
+    let _established_signer = established_signer.into_transport().unwrap();
+
     let remote = SignerTransportKeyPair::generate(&mut rng);
     let (record, _) = confirmed_pairing(&local, &remote, NETWORK);
     fs::rename(&live_parent, &moved_parent).unwrap();
     assert_eq!(
         failing.add_confirmed(record, &mut rng),
         Err(PeerRegistryError::IoFailure)
+    );
+    assert_eq!(
+        established_local
+            .write_message(SignerTransportMessageKind::Abort, b"poisoned")
+            .unwrap_err(),
+        SignerTransportError::Closed
     );
     assert_eq!(
         failing

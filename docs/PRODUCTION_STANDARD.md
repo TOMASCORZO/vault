@@ -110,8 +110,10 @@ small auditable components, and evidence comparable to leading networks.
 
 ## Current repository status
 
-The existing H0 reference ledger, H1 envelope, and isolated RISC Zero accounting
-backend predate this directive and are not mainnet-eligible. They may inform and
+The existing H0 reference ledger, H1 envelope, and isolated RISC Zero
+transfer-v2 conformance oracle are not mainnet-eligible. They may inform and
 test the production design, but their presence does not satisfy the release
-gates above. The repository must continue to disclose this status until the
-corresponding production-intent components replace or harden them.
+gates above. The zkVM oracle has no consensus adapter, is not selected for
+transfers, and does not substitute for real Halo2 proof evidence. The repository
+must continue to disclose this status until the corresponding
+production-intent components replace or harden them.

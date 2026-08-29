@@ -1,7 +1,9 @@
 # Vault output authorization packet v1
 
-**Status:** production-intent codec, encrypted confirmed-peer lifecycle, Noise transport, and Unix replay store implemented; UX/hardware/review gates pending  
-**Last updated:** 2026-08-23
+**Status:** production-intent codec, mandatory trusted-confirmation boundaries,
+encrypted confirmed-peer lifecycle, Noise transport, and Unix replay store
+implemented; concrete UX/hardware/review gates pending
+**Last updated:** 2026-08-28
 
 ## 1. Scope
 
@@ -18,6 +20,12 @@ secure deletion appropriate to its wallet or hardware profile. The packet has
 no standalone MAC because authentication belongs to that transport. A future
 transport profile cannot change these bytes without assigning a new packet
 version.
+
+`VAOP` may be assembled locally as one component of a future delegated witness,
+but it is neither the canonical delegated witness package nor independently
+safe to send to a prover. Delegated proving uses the separate exact disclosure,
+authorization and transport boundary in
+[`DELEGATED_PROVING_V1.md`](DELEGATED_PROVING_V1.md).
 
 ## 2. Canonical encoding
 
@@ -51,9 +59,12 @@ viewing key. External payments are not required to belong to the signer.
 
 ## 3. Independent validation algorithm
 
-The signer obtains an `OutputAuthorizationIntent` from its own trusted policy
-or user-confirmation surface, independently of the untrusted coordinator. For
-each canonical action it then:
+The signer calls `TrustedTransferIntentSource` only after validating the public
+request against its local policy. That independent source returns recipient,
+amount, classification and memo as `ApprovedOutputIntent`; the crate binds them
+to the validated network and each canonical action nullifier to form
+`OutputAuthorizationIntent`. No permissive source is included. For each action
+the signer then:
 
 1. checks the exact network, sender scope, classification, recipient, value,
    nullifier, memo, wallet amount ceiling, and expected public output;
@@ -108,16 +119,24 @@ requires:
 
 - independent review of the implemented first-contact pairing, encrypted peer
   registry, and Unix crash-consistent replay store, plus keychain integration,
-  active-session shutdown, and rollback-resistant state for each hardware and
-  additional software platform;
-- a reviewed confirmation UX that derives intent independently and displays
-  payments, total fees, burn policy, network, and change without metadata
-  confusion;
-- multisignature rules proving that every required signer validates the same
-  action set and exact effects digest;
-- full positive/negative corpus files for 2/4/8/16 action buckets, parser
-  fuzzing, memory and latency benchmarks, secure-memory review, and external
-  Ironwood/wallet review.
+  and rollback-resistant state for each hardware and additional software
+  platform; registry-issued active sessions now shut down on revocation,
+  rotation, and uncertain lifecycle persistence but remain unaudited;
+- concrete reviewed trusted-display/input adapters that implement the frozen
+  confirmation traits and display payments, total fees, burn policy, network,
+  change and transcript without metadata confusion;
+- the multisignature participant/agreement and failure profile is frozen in
+  `MULTISIG_SIGNING_V1.md`, but its reviewed FROST cryptographic adapter,
+  protected share/nonce custody, key ceremony and external evidence remain
+  activation gates;
+- the delegated-proving authorization/disclosure/revocation profile is frozen
+  in `DELEGATED_PROVING_V1.md`, and its canonical witness/request/response
+  codecs are implemented, but its dedicated transport/store, Halo2 adapters and
+  endpoint evidence remain open;
+- sustained target-platform fuzzing and memory/latency measurements,
+  secure-memory review, and external Ironwood/wallet review. The complete local
+  2/4/8/16 positive/negative corpus and bounded runners are frozen in
+  [`SIGNER_CORPUS_V1.md`](SIGNER_CORPUS_V1.md).
 
 Until those gates close, `VAOP` v1 is engineering evidence and must not protect
 real funds.

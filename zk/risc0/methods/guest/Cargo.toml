@@ -1,5 +1,5 @@
 [package]
-name = "vault-zk-accounting-guest"
+name = "vault-zk-transfer-guest"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
@@ -11,4 +11,4 @@ license = "Apache-2.0"
 
 [dependencies]
 risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
-vault-zk-accounting-core = { path = "../../core" }
+vault-zk-transfer-core = { path = "../../core" }

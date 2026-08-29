@@ -7,12 +7,17 @@ license.workspace = true
 
 [dependencies]
 bincode.workspace = true
+incrementalmerkletree.workspace = true
+orchard.workspace = true
+pasta_curves.workspace = true
+rand_chacha.workspace = true
 risc0-zkvm = { workspace = true, features = ["prove", "disable-dev-mode"] }
 thiserror.workspace = true
+vault-burn = { path = "../../../crates/vault-burn" }
+vault-privacy = { path = "../../../crates/vault-privacy" }
 vault-protocol = { path = "../../../crates/vault-protocol" }
-vault-zk-accounting-core = { path = "../core" }
-vault-zk-accounting-methods = { path = "../methods" }
+vault-zk-transfer-core = { path = "../core" }
+vault-zk-transfer-methods = { path = "../methods" }
 
 [lints]
 workspace = true
-

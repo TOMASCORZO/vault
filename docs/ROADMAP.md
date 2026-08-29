@@ -26,6 +26,12 @@ decision evidence and never count as deployable features.
 
 **Goal:** prove the H0 invariants without exposing owners or amounts.
 
+The remaining scope is frozen and classified in
+[`H1_CLOSURE_MATRIX.md`](H1_CLOSURE_MATRIX.md). The cryptographic implementation
+items H1-C1 through H1-C4 are distinct from activation hardening, H2
+consensus/network integration, and later mainnet eligibility. Unchecked umbrella
+entries below are governed by that matrix and do not authorize work outside it.
+
 - [x] Add typed note commitments, nullifiers, state anchors, and circuit IDs.
 - [x] Add fail-closed proof-verifier integration and transaction domain separation.
 - [x] Add pre-verification limits for proof, ciphertext, inputs, and outputs.
@@ -40,8 +46,9 @@ decision evidence and never count as deployable features.
   and transaction effects (circuit ownership binding remains pending).
 - [x] Implement an accounting-only reference statement in a maintained zkVM.
 - [x] Generate, verify, and benchmark one real fail-closed RISC Zero receipt.
-- [ ] Extend the reference statement with membership, authorization,
-  nullifiers, note openings, and encryption consistency.
+- [x] **H1-C1:** Extend the transfer-v2 reference statement with membership,
+  ownership/authorization, nullifiers, note and commitment openings, encryption
+  consistency, exact accounting/burn, and descriptor-bound burn encryption.
 - [x] Specify and implement transfer-v2 actions using canonical
   `vault-privacy` commitments, value commitments, and fixed-size ciphertexts.
 - [x] Migrate note encryption to Ironwood V3 and pin the hardened `PostNu6_3`
@@ -92,13 +99,32 @@ decision evidence and never count as deployable features.
 - [x] Implement bounded finalized-recovery coordination with an explicit
   consensus-verified header source boundary, hostile compact-byte decoding,
   one-height durable commits, partial-success accounting, and exact reopen/resume.
-- [ ] Complete approved seed custody/import, trusted birthday and target
+- [ ] **H1-A2 / H2:** Complete approved seed custody/import, trusted birthday and target
   checkpoint distribution, a real validating full-node/light-client adapter,
   private/padded retrieval, product incomplete-recovery UX, backup rotation and restore drills,
   versioned migrations, checkpoint pruning/compaction and long-history growth,
   keychain/secure-element key plus rollback state, multi-platform stores,
   crash/power-loss/disk-full fault injection, private block retrieval, and
   privacy-side-channel benchmarks.
+  The H1-A2/H2 boundary and finite local evidence are tracked in
+  [`research/H1-A2-WALLET-HARDENING.md`](research/H1-A2-WALLET-HARDENING.md).
+  The real schema-1 to schema-2 wallet migration is now backup-first, atomic,
+  non-downgrading, interruption-tested, and supported during authenticated
+  legacy-backup restore. Backup receipts, copy verification, a no-deletion
+  rotation profile, and exact-path restore drills are now defined and tested.
+  Immutable bounded checkpoint retention and fully revalidated compaction are
+  now implemented. Bounded long-history/owned-note/migration runners, a
+  journal-observed process-crash controller, a guarded Linux ENOSPC campaign,
+  and paired Linux `perf` leakage profiles are ready; their small local smoke
+  checks do not replace external execution. The fail-closed recovery product
+  mapping and exact-anchor secure CAS rollback protocol are now implemented and
+  tested; real keychain/secure-element adapters remain platform gates. The
+  approved English BIP-39 generation/import boundary, explicit passphrase,
+  official vector, redaction, and zeroization are now implemented. Local H1-A2
+  interfaces/harnesses are complete; external/platform execution and review
+  remain open while local work proceeds to H1-A3. Real finalized
+  node/light-client sources and private
+  compact-block transport remain H2.
 - [x] Implement the canonical independent output-authorization packet,
   byte-exact Ironwood reconstruction, and policy-bound local transfer-v2
   signing session.
@@ -116,18 +142,80 @@ decision evidence and never count as deployable features.
 - [x] Separate explicit initialization from normal opening for both signer
   stores; reject duplicate initialization and fail closed on missing lifecycle
   or anti-replay state instead of silently resetting it.
-- [ ] Independently review pairing and both Unix stores; implement keychain and
+- [ ] **H1-A3:** Independently review pairing and both Unix stores; implement keychain and
   trusted confirmation/revocation UX adapters, active-session shutdown,
   secure-element rollback counters, other platform stores, hardware adapters,
   multisignature, and delegated-proving profiles.
-- [ ] Activate a verifier only after all proof, wallet, vector, benchmark, and
+  Registry-issued handshakes and transports now share a peer lifecycle gate:
+  revocation and rotation shut down the old active sessions, and uncertain
+  registry persistence shuts down every session before the poisoned handle can
+  be reused. Pairing, transfer preparation, revocation and rotation now also
+  require explicit trusted confirmation traits with no permissive default or
+  raw public bypass. Canonical protected-identity and secure replay-state
+  records now also have no-clobber/open separation and enforced atomic CAS
+  wrappers; the ordinary Unix replay file remains explicitly non-rollback-
+  resistant. These close only the local active-session, product-boundary and
+  platform-contract items. The multisignature profile now also freezes the
+  exact-threshold roster, per-action agreement, one-use nonce/abort rules and
+  final standard-signature session gate without enabling the audit-blocked
+  FROST feature. Concrete FROST/platform adapters and UX remain external
+  evidence. The delegated-proving profile now also freezes per-job exact
+  authorization, unavoidable complete-witness and account full-viewing
+  disclosure, rollback-resistant lifecycle/revocation and mandatory local proof
+  verification without activating a transport or granting spending authority.
+  Its bounded VDPW/VDPR/VDPS codecs and complete deterministic 2/4/8/16 signer,
+  ciphertext, multisig-agreement and proving corpus now reproduce byte-for-byte;
+  pinned local fuzz and latency/memory runners are ready. Dedicated remote
+  transport/store, suite adapters, reviewed FROST, platform/device evidence,
+  sustained target campaigns and endpoint review remain open. The exhausted
+  finite local sequence and external evidence split are tracked in
+  [`research/H1-A3-SIGNER-HARDENING.md`](research/H1-A3-SIGNER-HARDENING.md).
+- [ ] **H1-A4:** Activate a verifier only after all proof, wallet, vector, benchmark, and
   independent-review gates pass.
-- [ ] Benchmark at least two maintained proof-system implementations.
-- Define trusted-setup assumptions, if any.
+- [ ] **H1-A1:** Benchmark the selected Halo2 implementation and retain the
+  terminated RISC Zero proving attempt as comparative evidence, not an
+  activation gate. Opt-in local all-bucket verification/RSS tooling, one
+  repeated 2-Action proving measurement plus one 4/8/16 sample, same-builder
+  byte reproduction, malformed-envelope corpus, deactivation-boundary exercise,
+  and a fresh dependency scan are recorded in
+  [`research/H1-A1-PROOF-ENGINEERING.md`](research/H1-A1-PROOF-ENGINEERING.md).
+  A one-time in-memory PK/VK reconstruction design is now selected and rejects
+  parameter or pinned-VK fingerprint mismatches without inventing an upstream
+  key format. A pinned AddressSanitizer/libFuzzer harness now covers raw and
+  structured composite-envelope decoding; its five-minute local smoke run was
+  clean but is not sustained acceptance evidence. A pinned three-lockfile
+  RustSec gate now denies all findings except the exact inactive
+  `RUSTSEC-2023-0089` warning and fails if its package becomes active.
+  Target-hardware/all-bucket proving, sustained fuzzing, two isolated clean
+  same-host builds, and full-bound burn recovery remain open, so H1-A1 is not
+  complete.
+  Current burn-table scaling projects about
+  11.94 GB RSS at the full bound and rejects the local 8 GiB host for that gate;
+  no alternative algorithm or lower bound was adopted. A canonical
+  4,637,240,716-byte full-bound cache format now persists only the policy-bound
+  baby-step sequence and rebuilds the same `HashMap`; bounded restart reached
+  1.405 s at 4,194,304 steps, while the full digest and resource acceptance
+  remain external. Two clean local Halo2 target trees now reproduce identical
+  `rlib` and setup-manifest binaries, but
+  repeatability on the declared owned acceptance host remains open; the
+  project explicitly accepts that this is not independent reproduction.
+  All external acceptance work is accumulated in
+  [`research/H1-EXTERNAL-ACCEPTANCE-CAMPAIGN.md`](research/H1-EXTERNAL-ACCEPTANCE-CAMPAIGN.md)
+  for one coordinated run on the declared owned acceptance host after every
+  local runner is ready.
+  A deterministic mixed-bucket validator runner now covers declared common,
+  balanced, and maximum-heavy 2/4/8/16 profiles; its local smoke result is not
+  target-hardware acceptance.
+- [x] **H1-C2:** Define and reproduce proof-system setup and lifecycle
+  assumptions, including transparent parameters, all-bucket candidate VK
+  fingerprints, upgrade/deactivation rules, the non-selected RISC Zero role,
+  and separate DKG trust.
 - [x] Publish the first deterministic envelope transcript vector.
-- [ ] Publish real-proof positive and negative test vectors for both backends.
-- Design epoch burn aggregation and low-volume privacy handling.
-- Commission an external cryptography design review.
+- [x] **H1-C3:** Publish fixed real-proof positive and mutation vectors for the
+  selected Halo2 2/4/8/16-Action transfer shapes. RISC Zero remains a
+  non-consensus reference and its receipt is not a gate.
+- [x] **H1-C4:** Freeze epoch burn aggregation and low-volume privacy handling.
+- [ ] **H1-A4:** Commission an external cryptography design review.
 
 **Exit criterion:** reproducible proofs verify all invariants; no production or
 security claim is made.

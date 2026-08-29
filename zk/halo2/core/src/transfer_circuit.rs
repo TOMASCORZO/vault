@@ -24,7 +24,10 @@ use thiserror::Error;
 use vault_burn::{
     BURN_ENCRYPTION_SCHEME_ID, BurnCiphertext, BurnEncryptionError, EpochBurnPublicKey,
 };
-use vault_privacy::{PrivacyError, circuit::PreparedActionCircuit};
+use vault_privacy::{
+    PrivacyError,
+    circuit::{ACTION_CIRCUIT_VERSION, PreparedActionCircuit},
+};
 use vault_protocol::{ALLOWED_TRANSFER_V2_ACTION_COUNTS, TransferV2Effects};
 
 use crate::{
@@ -43,12 +46,27 @@ const TRANSFER_EFFECTS_DIGEST_LIMBS: usize = 2;
 pub const TRANSFER_EFFECTS_DIGEST_INSTANCE_OFFSET: usize =
     BURN_BINDING_INSTANCE_OFFSET + BURN_BINDING_INSTANCE_VALUES;
 
-/// Degree parameter for the current monolithic Action/accounting/burn/effects
-/// shape.
+/// Degree parameter for the 2, 4, and 8-Action transfer buckets.
+pub const VAULT_TRANSFER_K_2_TO_8: u32 = 14;
+
+/// Degree parameter for the 16-Action transfer bucket.
 ///
-/// This is provisional until the signer policy, all buckets, and production
-/// benchmarks have established the final resource envelope.
-pub const VAULT_TRANSFER_K: u32 = 14;
+/// The largest canonical bucket does not fit at `k = 14`; setup reproduction
+/// must therefore use this distinct parameter set rather than silently
+/// omitting the bucket or accepting a synthesis failure later.
+pub const VAULT_TRANSFER_K_16: u32 = 15;
+
+/// Returns the selected setup degree for a canonical transfer-v2 action count.
+///
+/// No other const-generic circuit shape is eligible for a setup manifest.
+#[must_use]
+pub const fn vault_transfer_k(action_count: usize) -> Option<u32> {
+    match action_count {
+        2 | 4 | 8 => Some(VAULT_TRANSFER_K_2_TO_8),
+        16 => Some(VAULT_TRANSFER_K_16),
+        _ => None,
+    }
+}
 
 /// Native failures while preparing the fixed-shape monolithic witness.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -330,6 +348,27 @@ pub struct VaultTransferCircuit<const N: usize> {
     effects_digest: Option<[pallas::Base; TRANSFER_EFFECTS_DIGEST_LIMBS]>,
 }
 
+impl<const N: usize> VaultTransferCircuit<N> {
+    /// Builds the witness-free circuit used for deterministic key generation.
+    ///
+    /// Only transfer-v2's canonical padded action counts have eligible circuit
+    /// shapes. This constructor deliberately rejects every other const-generic
+    /// instantiation before setup tooling can assign it a verifying-key digest.
+    pub fn empty() -> Result<Self, VaultTransferPreparationError> {
+        if !ALLOWED_TRANSFER_V2_ACTION_COUNTS.contains(&N) {
+            return Err(VaultTransferPreparationError::UnsupportedActionCount);
+        }
+
+        Ok(Self {
+            actions: Some(std::array::from_fn(|_| {
+                OrchardActionCircuit::empty(ACTION_CIRCUIT_VERSION)
+            })),
+            accounting: None,
+            effects_digest: None,
+        })
+    }
+}
+
 impl<const N: usize> core::fmt::Debug for VaultTransferCircuit<N> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -599,6 +638,21 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn setup_degree_exists_only_for_canonical_action_buckets() {
+        assert_eq!(vault_transfer_k(2), Some(VAULT_TRANSFER_K_2_TO_8));
+        assert_eq!(vault_transfer_k(4), Some(VAULT_TRANSFER_K_2_TO_8));
+        assert_eq!(vault_transfer_k(8), Some(VAULT_TRANSFER_K_2_TO_8));
+        assert_eq!(vault_transfer_k(16), Some(VAULT_TRANSFER_K_16));
+        for unsupported in [0, 1, 3, 15, 17, usize::MAX] {
+            assert_eq!(vault_transfer_k(unsupported), None);
+        }
+        assert_eq!(
+            VaultTransferCircuit::<3>::empty().unwrap_err(),
+            VaultTransferPreparationError::UnsupportedActionCount
+        );
+    }
     use crate::{
         accounting::{AccountingActionWitness, PreparedAccountingArithmetic},
         burn_binding::PreparedAccountingBurn,
@@ -973,7 +1027,7 @@ mod tests {
         assert_ne!(replacement_inputs.to_columns(), prepared.public_inputs());
 
         let prover = halo2_proofs::dev::MockProver::run(
-            VAULT_TRANSFER_K,
+            VAULT_TRANSFER_K_2_TO_8,
             &prepared.circuit(),
             replacement_inputs.to_columns(),
         )
@@ -1041,7 +1095,7 @@ mod tests {
             &changed_inputs[1][TRANSFER_EFFECTS_DIGEST_INSTANCE_OFFSET..]
         );
         let prover = halo2_proofs::dev::MockProver::run(
-            VAULT_TRANSFER_K,
+            VAULT_TRANSFER_K_2_TO_8,
             &prepared.circuit(),
             changed_inputs,
         )
@@ -1080,7 +1134,7 @@ mod tests {
         let fixture = fixture(FixtureMode::Valid);
         let prepared = fixture.prepared;
         halo2_proofs::dev::MockProver::run(
-            VAULT_TRANSFER_K,
+            VAULT_TRANSFER_K_2_TO_8,
             &prepared.circuit(),
             prepared.public_inputs(),
         )
@@ -1093,7 +1147,7 @@ mod tests {
         let fixture = fixture(FixtureMode::ShiftedAccountingValues);
         let prepared = fixture.prepared;
         let prover = halo2_proofs::dev::MockProver::run(
-            VAULT_TRANSFER_K,
+            VAULT_TRANSFER_K_2_TO_8,
             &prepared.circuit(),
             prepared.public_inputs(),
         )
@@ -1106,7 +1160,7 @@ mod tests {
         let fixture = fixture(FixtureMode::ExternalOutputClaimedAsChange);
         let prepared = fixture.prepared;
         let prover = halo2_proofs::dev::MockProver::run(
-            VAULT_TRANSFER_K,
+            VAULT_TRANSFER_K_2_TO_8,
             &prepared.circuit(),
             prepared.public_inputs(),
         )
@@ -1129,7 +1183,7 @@ mod tests {
         let proof_instances = [&public_columns[..]];
 
         let keygen_started = Instant::now();
-        let params: Params<EqAffine> = Params::new(VAULT_TRANSFER_K);
+        let params: Params<EqAffine> = Params::new(VAULT_TRANSFER_K_2_TO_8);
         let vk = keygen_vk(&params, &empty_circuit).expect("Vault transfer verifying key");
         let pk = keygen_pk(&params, vk, &empty_circuit).expect("Vault transfer proving key");
         let keygen_elapsed = keygen_started.elapsed();

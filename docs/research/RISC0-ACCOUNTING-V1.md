@@ -4,6 +4,12 @@
 **Status:** real proof verified end to end; accounting-only and not eligible for
 consensus activation.
 
+> Historical result: this guest has been superseded by the transfer-v2
+> conformance statement in
+> [`RISC0-TRANSFER-V2-REFERENCE.md`](RISC0-TRANSFER-V2-REFERENCE.md). Its
+> measurements remain useful as a baseline but it is not the current H1-C1
+> statement and must not be reactivated as a consensus adapter.
+
 ## Result
 
 Vault now has a RISC Zero guest that privately proves a strict subset of the

@@ -127,9 +127,10 @@ private design therefore proves each burn inside the transfer circuit and
 publishes only delayed, thresholded epoch aggregates with a supply-consistency
 proof. The selected production-intent construction is threshold exponential
 ElGamal over Pallas with a canonical epoch DKG descriptor; the per-transfer
-circuit equations and descriptor binding are implemented, while DKG consensus,
-bounded aggregate recovery, low-volume policy, and independent review remain
-H1 blockers.
+circuit equations, descriptor binding, privacy-gated aggregate formation,
+malicious-share filtering, and bounded recovery are implemented. DKG consensus,
+finalized scheduling/publication, full-bound performance acceptance, public
+supply integration, and independent review remain blockers.
 
 The H0 implementation in `vault-core` is a transparent accounting oracle. It
 checks the formula, note conservation, gas distribution, and double-spend

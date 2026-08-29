@@ -55,12 +55,15 @@ revisión independiente y auditorías establecidas en el
   cambios de anchor, transcript y longitud.
 - Envelope compuesto fail-closed: la prueba de acciones no puede llegar a
   consenso sin un segundo verificador de contabilidad, gas, burn y ciphertext.
-- Burn cifrado Pallas ElGamal de 64 bytes que ya cifra, agrega y verifica
-  shares DLEQ; DKG y recuperación acotada siguen bloqueando uso real.
+- Burn cifrado Pallas ElGamal de 64 bytes que ya cifra, agrega, filtra shares
+  DLEQ hostiles y recupera el total dentro de un límite explícito. H1-C4 exige
+  128 efectos y 16 ventanas, sin revelar por timeout; DKG, integración H2 y el
+  benchmark del límite completo siguen bloqueando uso real.
 - Componente Halo2 de contabilidad para los buckets 2/4/8/16: descompone cada
   importe en 64 bits, fuerza booleanos y dummy slots vacíos, acumula importes,
   vincula gas público, calcula `ceil(taxable/200)` con resto menor que 200 y
-  exige conservación exacta. No posee suite ID ni verificador activable.
+  exige conservación exacta. H1-C3 fija IDs y vectores de conformidad para
+  todos los buckets, pero no existe un verificador de consenso activado.
 - La celda exacta de burn calculada por esa aritmética ya abre el compromiso de
   valor y satisface dentro del mismo circuito `C1=[r]G` y
   `C2=[burn]H+[r]PK_epoch`; alterar el burn o el ciphertext falla.
@@ -172,11 +175,12 @@ revisión independiente y auditorías establecidas en el
 ## Todavía no implementado
 
 - Revisión independiente del pairing y ambos stores Unix ya implementados,
-  adapter de keychain, cierre de sesiones activas, UX confiable de
-  confirmación/revocación, contador resistente a rollback en secure element,
-  perfiles no-Unix y adaptadores para hardware wallets, multisig y delegated
-  proving. Un filesystem detecta corrupción, pero no puede detectar por sí solo
-  la restauración maliciosa de un snapshot válido.
+  adapters reales de keychain/secure element, perfiles no-Unix, UX confiable y
+  dispositivos físicos. El cierre de sesiones, los contratos resistentes a
+  rollback, el acuerdo multisig y la autorización/divulgación/revocación de
+  proving delegado ya están congelados localmente, pero faltan sus adapters,
+  corpora y evidencia externa. Un filesystem detecta corrupción, pero no puede
+  detectar por sí solo la restauración maliciosa de un snapshot válido.
 - Rotación y simulacros operativos del backup autenticado ya implementado;
   custodia/importación aprobada de seed y distribución confiable de birthday y
   target; adapter real de full node/light client, retrieval privado y política
@@ -210,8 +214,9 @@ finality con consenso real. El siguiente objetivo de wallet es cerrar
 ese adapter, custodia/importación aprobada de seed, distribución confiable de checkpoints,
 política para rangos mayores, operaciones y simulacros de backup, migraciones,
 pruning/compactación, keychain/contador anti-rollback y pruebas de fallos; después cerrar
-hardware/multisig/delegated proving y medir claves persistidas, memoria, todos
-los buckets y verificación por lotes.
+los corpora/harnesses finales de signer y proving delegado, y después ejecutar
+en una sola campaña las pruebas externas de hardware, multisig, proving,
+claves persistidas, memoria, todos los buckets y verificación por lotes.
 
 ## Decisión central
 

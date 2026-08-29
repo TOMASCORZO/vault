@@ -112,11 +112,19 @@ remaining transport obligations are specified in
 Before this policy can be frozen, Vault must:
 
 - independently review the implemented first-contact pairing and Unix stores;
-  add keychain, active-session shutdown, secure-element/non-Unix replay profiles and concrete
-  hardware/multisignature/delegated-prover adapters around the paired channel;
-- build a confirmation interface whose trusted intent source is independent of
-  the coordinator packet and covers recipients, amounts, gas ceilings, network,
-  burn policy, and change classification;
+  add keychain, secure-element/non-Unix replay profiles and concrete hardware
+  adapters around the paired signer channel; the dedicated delegated-proving
+  policy, irreversible disclosure and local-verification contract is frozen,
+  while its separate transport identity/channel, durable lifecycle store,
+  corpus and endpoint evidence remain open; the
+  multisignature agreement and nonce-failure contract is frozen, while its
+  reviewed FROST cryptographic/platform adapter remains open;
+  active registry sessions now shut down on revocation, rotation, or uncertain
+  lifecycle persistence but still require that independent review;
+- implement and independently review concrete trusted-display/input adapters
+  for the now-enforced confirmation traits; their source must remain independent
+  of coordinator packets and cover recipients, amounts, gas ceilings, network,
+  burn policy, transcript, and change classification;
 - define the exact dummy-output encryption policy and demonstrate that it does
   not create an avoidable distinguisher or subliminal-channel regression;
 - publish deterministic positive and negative vectors for every ciphertext

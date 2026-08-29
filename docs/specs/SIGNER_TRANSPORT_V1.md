@@ -1,7 +1,10 @@
 # Vault paired signer transport v1
 
-**Status:** production-intent XX pairing, encrypted peer lifecycle, KK channel, Unix replay store, request/response codecs, and bound session implemented; UX/hardware/review gates open  
-**Last updated:** 2026-08-23
+**Status:** production-intent XX pairing, encrypted peer lifecycle, KK channel,
+active-session shutdown, Unix replay store, protected key/replay contracts,
+request/response codecs, and bound session implemented; concrete
+UX/hardware/review gates open
+**Last updated:** 2026-08-28
 
 ## 1. Security scope
 
@@ -21,6 +24,11 @@ first-contact ceremony in section 2. KK is forbidden for first-contact pairing.
 Vault transport identities are generated independently and MUST NOT be derived from
 or reused as VLT spending, full-viewing, incoming-viewing, or outgoing-viewing
 keys.
+
+Delegated proving is not an extension of this signer channel. Its frozen
+profile requires a separate prover identity, per-job channel and committed
+witness package; signer transport keys and pairing records MUST NOT be reused.
+See [`DELEGATED_PROVING_V1.md`](DELEGATED_PROVING_V1.md).
 
 The Noise prologue commits to the fixed Vault signer domain, network ID, and
 initiator/responder static public keys. Empty handshake payloads are mandatory.
@@ -68,9 +76,11 @@ independent channel. A QR code is only a rendering of those 16 bytes; scanning
 through the same untrusted coordinator is not independent authentication.
 
 The API returns `UnconfirmedSignerPairing` after XX. That type cannot open a KK
-channel. Only constant-time confirmation of the independently observed value
-consumes it and produces `PairedSignerRecord`. The record contains no private
-key and has this fixed 152-byte codec:
+channel. Its only public conversion consumes a `TrustedPairingConfirmation`
+adapter, gives that adapter the exact role/network/static-key/fingerprint
+facts, and constant-time compares the independently returned value before
+producing `PairedSignerRecord`. The crate provides no echo/auto-approve adapter.
+The record contains no private key and has this fixed 152-byte codec:
 
 | Offset | Bytes | Field |
 |---:|---:|---|
@@ -91,6 +101,30 @@ stored together with its lifecycle/revocation metadata inside the wallet's
 authenticated encrypted store. The separate local X25519 private key MUST stay
 in protected key storage. Every later connection checks that local key against
 the confirmed record before creating KK.
+
+The protected identity record supplied to platform adapters is exactly 136
+bytes:
+
+| Offset | Bytes | Field |
+|---:|---:|---|
+| 0 | 4 | magic ASCII `VSKM` |
+| 4 | 2 | version `1` |
+| 6 | 1 | local role: coordinator `0`, signer `1` |
+| 7 | 1 | reserved zero |
+| 8 | 32 | non-zero network ID |
+| 40 | 32 | dedicated X25519 transport private key |
+| 72 | 32 | independent peer-registry storage key |
+| 104 | 32 | independent registry ID |
+
+`SignerProtectedKeyMaterial` is non-`Clone`, redacts diagnostics, and zeroizes
+both private keys on drop. `SignerProtectedKeyStore::create` MUST be durable and
+no-clobber and MUST bind the record to the intended application, user and
+wallet/signer slot. `ProtectedSignerKeys::enroll` reads back and constant-time
+checks the complete newly stored record. Normal opening fails when the slot is
+missing; it never generates a replacement identity. Platform adapters MUST
+document authentication prompts, lock state, synchronization, backup,
+recovery, process-memory exposure and crash-dump behavior. A plain file or a
+password-derived record does not satisfy this protected-storage contract.
 
 ## 3. Encrypted peer lifecycle registry
 
@@ -150,20 +184,29 @@ Entries are strictly sorted by peer ID. At most 16 may be active and 256 may be
 retained over the registry lifetime. Duplicate peer IDs or remote static keys
 are rejected even when the older entry is revoked.
 
-Adding a peer requires an OOB-confirmed record. Revocation increments the
-generation and atomically writes a permanent tombstone before success returns.
-Rotation performs one atomic transition: the old active identity is tombstoned
-and a separately confirmed record with a fresh remote static key is installed
-at the same generation. Re-pairing a revoked static key is forbidden. Records
-cannot be extracted from the registry to construct KK: the public API opens a
+Adding a peer requires an OOB-confirmed record. Revocation and rotation have no
+raw public mutation entry point: both require `TrustedPeerConfirmation` over
+the authenticated network, local role, current fingerprint, optional
+replacement fingerprint, and registry generation. Rejection changes neither
+the lifecycle state nor active sessions. After confirmation, revocation
+increments the generation and atomically writes a permanent tombstone. Rotation
+performs one atomic transition: the old active identity is tombstoned and a
+separately confirmed record with a fresh remote static key is installed at the
+same generation. Re-pairing a revoked static key is forbidden. Records cannot
+be extracted from the registry to construct KK: the public API opens a
 handshake only after finding an active entry and matching the protected local
 key. The lower-level KK constructors are crate-private.
 
 Revocation prevents future handshakes; it is not retroactive cryptographic
-erasure of a handshake already completed in memory. The wallet lifecycle layer
-MUST close active transports when it commits revocation. Each Vault transport
-is independently limited to one signing attempt and four messages per
-direction.
+erasure of keys or ciphertexts already held by a compromised peer. Every
+registry-issued handshake and transport carries a shared peer lifecycle gate.
+Each Noise operation holds the gate for the complete state transition.
+Revocation and rotation shut the old gate before the durable registry rewrite,
+waiting for an operation already in flight and rejecting every later operation
+with the opaque `Closed` error. Therefore no new local operation can cross a
+successfully committed revocation boundary. An uncertain persistence failure
+poisons the registry and shuts every active gate. Each Vault transport is also
+independently limited to one signing attempt and four messages per direction.
 
 The registry reuses the same Unix locked atomic-file primitive as `VSRG`:
 absolute path, protected parent, stable exclusive lock, `0600`, `O_NOFOLLOW`,
@@ -271,6 +314,46 @@ non-Unix durability and anti-rollback profiles remain activation gates.
 `CrashConsistentReplayStore::open` therefore rejects non-Unix targets instead
 of silently weakening this contract.
 
+For devices whose threat model includes host-controlled rollback, the
+platform-neutral protected profile stores this complete 136-byte logical state:
+
+| Offset | Bytes | Field |
+|---:|---:|---|
+| 0 | 4 | magic ASCII `VSRS` |
+| 4 | 2 | version `1` |
+| 6 | 1 | pending flag `0` or `1` |
+| 7 | 1 | reserved zero |
+| 8 | 8 | non-zero secure transition generation |
+| 16 | 8 | highest durably issued challenge counter |
+| 24 | 8 | highest durably consumed challenge counter |
+| 32 | 32 | pending network ID, or zero |
+| 64 | 32 | pending channel binding, or zero |
+| 96 | 32 | pending random session ID, or zero |
+| 128 | 8 | pending challenge counter, or zero |
+
+With no pending challenge, issued and consumed counters MUST be equal and the
+pending area MUST be zero. With a pending challenge, every binding MUST be
+non-zero, its counter MUST equal the highest issued counter, and it MUST exceed
+the highest consumed counter. The transition generation increments on every
+issue and every consumption, including when a new issue invalidates an
+abandoned pending challenge.
+
+`SignerSecureReplayStore` MUST bind one instance to one protected signer slot
+and atomically compare-and-swap this complete state. It MUST survive process
+and device restart plus power loss and reject host-controlled restoration of
+an older valid state. A file, checksum, database transaction or volatile lock
+does not satisfy that interface. A secure-element adapter MAY combine a
+hardware monotonic counter with an authenticated sealed record, but MUST expose
+the same atomic semantics and specify counter endurance and exhaustion.
+
+`RollbackProtectedReplayStore::enroll` refuses an occupied slot and `open`
+refuses a missing one. Issuance persists the exact pending challenge before
+returning it; consumption persists its removal before success. A CAS mismatch
+or adapter error permanently poisons the handle, including when the adapter may
+have committed before reporting failure. Reopening loads whichever complete
+state the protected adapter durably committed. The crate deliberately provides
+no permissive or filesystem implementation of this secure trait.
+
 ## 6. Authorization request
 
 The complete request is one encrypted `AuthorizationRequest` payload:
@@ -292,10 +375,15 @@ canonical action count. Effects and every packet are decoded independently;
 truncation, trailing bytes, alternate encodings, malformed cryptographic
 fields, or count mismatch abort the session.
 
-The signer obtains trusted `OutputAuthorizationIntent` values from its local
-policy/confirmation UI, not from this request. It reconstructs every Ironwood
-output as specified by `OUTPUT_AUTHORIZATION_V1`, applies the locally stored
-`TransferV2SignerPolicy`, then derives:
+`prepare_confirmed_request` first checks the exact challenge, policy digest and
+all public effects against the locally stored `TransferV2SignerPolicy`. Only
+then does it call `TrustedTransferIntentSource` with the network, circuit, burn
+scheme/key/epoch, padded action count, gas/fee, effects digest and transcript
+ID. The adapter supplies recipient, amount, classification and memo as
+zeroizing `ApprovedOutputIntent` values from an independent source; those
+private facts are never derived from coordinator packets for confirmation. The
+signer binds them to each canonical action and reconstructs every Ironwood
+output as specified by `OUTPUT_AUTHORIZATION_V1`, then derives:
 
 ```text
 transcript_id = BLAKE3-DERIVE(
@@ -332,9 +420,15 @@ and every signature. Failure returns no partial authorization set.
 The `vault-signer` crate implements the bounded XX ceremony, type-level
 unconfirmed/confirmed transition, canonical paired record, fixed-size
 XChaCha20-Poly1305 peer registry, permanent revocation tombstones, atomic peer
-rotation, registry-gated KK handshake, channel binding, poison-on-failure
-transport, challenge/request/response codecs, Unix crash-consistent replay
-store, independent packet reconstruction, one-shot action state, and a complete
+rotation, registry-gated KK handshake, revocation/rotation shutdown of active
+handshakes and transports, all-session shutdown on uncertain registry
+persistence, mandatory trusted-confirmation traits with no permissive default,
+channel binding, poison-on-failure transport,
+challenge/request/response codecs, Unix crash-consistent replay store,
+protected signer-key and rollback-resistant replay adapter contracts,
+canonical exact-threshold multisignature policy/agreement and nonce-lifecycle
+contracts with a final standard-signature gate,
+independent packet reconstruction, one-shot action state, and a complete
 encrypted round trip that produces a valid transfer-v2 using the real stores.
 Tests reject wrong pairing/transport
 networks and identities, fingerprint mismatch, record mutation, symlink and
@@ -353,11 +447,16 @@ This is not yet hardware-wallet-ready. Activation still requires:
   pairing lifecycle, filesystem store, dependency surfaces, and test corpus;
 - production durable counter/replay stores for every additional software and
   hardware platform, including power-loss, backup, migration, and rollback tests;
-- keychain/secure-enclave adapters, active-session shutdown, hardware adapters,
-  independent confirmation/revocation UX, multisignature participant rules,
-  delegated-prover policy, rate limits, and privacy-safe diagnostics;
-- deterministic transport/request/response corpus files, parser fuzzing,
-  latency/memory benchmarks, dependency provenance, and external review.
+- keychain/secure-enclave adapters, hardware adapters, concrete independently
+  reviewed trusted-display/input implementations of the confirmation traits,
+  and a reviewed FROST implementation of the frozen multisignature profile;
+- a dedicated delegated-prover transport, rollback-resistant policy/job store,
+  suite adapters implementing the separately frozen `DELEGATED_PROVING_V1`
+  contract, plus rate limits and privacy-safe diagnostics;
+- sustained target-platform parser fuzzing and latency/memory measurements,
+  dependency provenance, and external review. The deterministic local
+  transport/request/response corpus and bounded runners are frozen in
+  [`SIGNER_CORPUS_V1.md`](SIGNER_CORPUS_V1.md).
 
 Until those gates close, the implementation must not protect real funds.
 
@@ -369,4 +468,5 @@ Until those gates close, the implementation must not protect real funds.
 - [`fs2` advisory file-lock API](https://docs.rs/fs2/0.4.3/fs2/trait.FileExt.html)
 - [`tempfile` persistence API](https://docs.rs/tempfile/3.27.0/tempfile/struct.NamedTempFile.html)
 - [`OUTPUT_AUTHORIZATION_V1.md`](OUTPUT_AUTHORIZATION_V1.md)
+- [`DELEGATED_PROVING_V1.md`](DELEGATED_PROVING_V1.md)
 - [`TRANSFER_V2.md`](TRANSFER_V2.md)

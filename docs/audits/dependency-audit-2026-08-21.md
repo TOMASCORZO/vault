@@ -2,6 +2,25 @@
 
 This is point-in-time evidence, not a warranty that dependencies are safe.
 
+Reverified offline on 2026-08-27 as part of H1-A1. The enforced
+`scripts/audit.sh` gate pins `cargo-audit 0.22.2`, scans the root, Halo2 release,
+and Halo2 fuzz lockfiles, denies all warnings except the exact
+`RUSTSEC-2023-0089` allowlist entry, and separately fails if
+`atomic-polyfill` becomes active in any of those three dependency graphs. The
+current scan loaded 1,226 advisories and scanned 177, 126, and 132 dependencies
+respectively, with no known vulnerability or non-allowlisted warning.
+
+Reverified offline again on 2026-08-27 after pinning `bip39 = 2.2.2` for the
+checked English mnemonic boundary. The root lockfile added `bip39`,
+`bitcoin_hashes 0.14.101`, `hex-conservative 0.2.2`, `tinyvec 1.12.0`,
+`tinyvec_macros 0.1.1`, and `unicode-normalization 0.1.25`, increasing the root
+scan from 171 to 177 dependencies. Only `std`, Unicode NFKD normalization, and
+zeroization are enabled; optional random generation, serialization, and
+non-English wordlists are disabled. The scan found no known vulnerability or
+non-allowlisted warning. Vault supplies OS entropy itself, verifies the official
+BIP-39 vector, and wraps mnemonic/passphrase/seed allocations for redaction and
+zeroization; this does not replace memory/UX or independent cryptographic review.
+
 Reverified on 2026-08-23 after the transfer-v2 monolithic public-input boundary,
 canonical local signer session, confirmed Noise XX/KK lifecycle,
 crash-consistent Unix signer stores, canonical compact block, finalized local
@@ -17,7 +36,7 @@ pinned `shardtree` and `rusqlite` graph described below.
 ```text
 Tool: cargo-audit 0.22.2
 Input: workspace Cargo.lock after wallet finalized-recovery coordinator integration
-RustSec advisories loaded: 1,225
+RustSec advisories loaded: 1,226
 Crate dependencies scanned: 171
 Known vulnerabilities detected: 0
 Allowed warnings: 1
@@ -31,11 +50,24 @@ and only `std`; `cargo tree` confirms this chain is not in the compiled target
 graph. Vault does not enable Orchard's `unstable-frost` feature. The warning
 remains tracked because future feature changes could activate it.
 
-Command:
+H1-A3-4 deliberately leaves the concrete RedPallas FROST implementation
+disabled. Only the policy, participant-agreement, durable nonce-lifecycle, and
+final standard-signature verification contracts were added; the dependency
+graph is unchanged. A future adapter must remove or replace the inactive
+`atomic-polyfill` path, pass this gate without a new exception, and demonstrate
+that its re-randomization uses exactly the proof-bound `alpha`. No local FROST
+implementation or simulated share path is accepted as a substitute.
+
+Commands:
 
 ```bash
 ./scripts/audit.sh
+VAULT_AUDIT_OFFLINE=1 ./scripts/audit.sh
 ```
+
+The second form prohibits advisory-database fetching and uses the locally
+provisioned database. The advisory is allowed only while the independent
+locked all-target graph checks confirm that its package is inactive.
 
 The audit covers published RustSec advisories only. It does not detect unknown
 vulnerabilities, malicious-but-unreported packages, logic defects, unsafe build

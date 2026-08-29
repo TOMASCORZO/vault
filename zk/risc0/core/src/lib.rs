@@ -1,218 +1,260 @@
-//! Shared, deterministic statement for Vault's experimental RISC Zero backend.
+//! Shared transfer-v2 statement for Vault's isolated RISC Zero oracle.
 //!
-//! This statement proves private accounting only. It does **not** yet prove
-//! note-tree membership, spend authorization, nullifier derivation, individual
-//! output-note openings, or ciphertext correctness.
+//! This crate validates the production-intent transfer invariants but exposes
+//! no consensus verifier or state-transition adapter.
 
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
+use vault_burn::{
+    BURN_ENCRYPTION_SCHEME_ID, BurnCiphertext, EpochBurnPublicKey, MAX_BURN_PARTICIPANTS,
+};
+use vault_privacy::{
+    NOTE_TREE_DEPTH, OUTPUT_AUTHORIZATION_PACKET_BYTES, PRIVATE_NOTE_BYTES,
+    reference::{verifies_reference_burn_commitment, verify_reference_action},
+};
+use vault_protocol::{TRANSFER_V2_MAX_EFFECT_BYTES, TransferV2Effects};
+use zeroize::Zeroize;
 
-const PUBLIC_INPUT_DOMAIN: &str = "vault.protocol.transfer-v1.public-inputs.2026-08-21";
-const BALANCE_DOMAIN: &str = "vault.zk.risc0.accounting-v1.balance.2026-08-21";
-const BURN_DOMAIN: &str = "vault.zk.risc0.accounting-v1.burn.2026-08-21";
+/// Exact reference statement schema accepted by the guest.
+pub const REFERENCE_STATEMENT_VERSION: u16 = 1;
+/// Native-VLT monetary-policy maximum used by every private note witness.
+pub const MAXIMUM_NATIVE_VALUE: u64 = 21_000_000 * 1_000_000_000;
 
-/// Transfer-v1 protocol version accepted by the research guest.
-pub const TRANSFER_V1_PROTOCOL_VERSION: u16 = 1;
-/// Maximum private inputs mirrored from the consensus envelope.
-pub const MAX_INPUTS: usize = 16;
-/// Maximum private outputs mirrored from the consensus envelope.
-pub const MAX_OUTPUTS: usize = 16;
-
-/// One proof-bound public output envelope.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct PublicOutput {
-    /// Public note commitment.
-    pub note_commitment: [u8; 32],
-    /// Ephemeral note-encryption key.
-    pub ephemeral_key: [u8; 32],
-    /// Authenticated encrypted note payload.
-    pub ciphertext: Vec<u8>,
+/// One private action witness paired with the action at the same public index.
+#[derive(Serialize, Deserialize)]
+pub struct ReferenceActionWitness {
+    /// Canonical 96-byte full viewing capability controlling the input note.
+    pub full_viewing_key: Vec<u8>,
+    /// Canonical fixed private Ironwood V3 input note.
+    pub input_note: Vec<u8>,
+    /// Zero-based input position in the note tree.
+    pub membership_position: u32,
+    /// Exactly 32 canonical sibling nodes, from leaf to root.
+    pub membership_auth_path: Vec<[u8; 32]>,
+    /// Non-zero Pallas scalar `alpha` randomizing the public spend key.
+    pub authorization_randomizer: [u8; 32],
+    /// Non-zero Orchard net-value commitment trapdoor.
+    pub net_value_trapdoor: [u8; 32],
+    /// Exact fixed output-authorization packet reconstructed in the guest.
+    pub output_authorization_packet: Vec<u8>,
 }
 
-/// One proof-bound public burn envelope.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct PublicBurn {
-    /// Hiding commitment constrained by the accounting guest.
-    pub commitment: [u8; 32],
-    /// Placeholder for the future threshold-encrypted burn amount.
-    pub ciphertext: Vec<u8>,
-}
-
-/// Every public transfer field, in the exact transfer-v1 transcript order.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TransferPublicFields {
-    /// Protocol version.
-    pub version: u16,
-    /// Network domain.
-    pub chain_id: [u8; 32],
-    /// Activated circuit or guest image identifier.
-    pub circuit_id: [u8; 32],
-    /// Recent authenticated state root.
-    pub anchor: [u8; 32],
-    /// Consumed-note nullifiers.
-    pub nullifiers: Vec<[u8; 32]>,
-    /// Created encrypted notes.
-    pub outputs: Vec<PublicOutput>,
-    /// Research commitment to the complete private accounting witness.
-    pub balance_commitment: [u8; 32],
-    /// Hidden burn envelope.
-    pub burn: PublicBurn,
-    /// Deterministic gas units.
-    pub gas_units: u64,
-    /// Atomic VLT paid for each gas unit.
-    pub fee_per_gas: u64,
-}
-
-impl TransferPublicFields {
-    /// Recomputes the consensus public-input digest inside the proven program.
-    #[must_use]
-    pub fn public_inputs_digest(&self) -> [u8; 32] {
-        let mut hasher = Hasher::new_derive_key(PUBLIC_INPUT_DOMAIN);
-        hasher.update(&self.version.to_le_bytes());
-        hasher.update(&self.chain_id);
-        hasher.update(&self.circuit_id);
-        hasher.update(&self.anchor);
-        update_count(&mut hasher, self.nullifiers.len());
-        for nullifier in &self.nullifiers {
-            hasher.update(nullifier);
-        }
-        update_count(&mut hasher, self.outputs.len());
-        for output in &self.outputs {
-            hasher.update(&output.note_commitment);
-            hasher.update(&output.ephemeral_key);
-            update_bytes(&mut hasher, &output.ciphertext);
-        }
-        hasher.update(&self.balance_commitment);
-        hasher.update(&self.burn.commitment);
-        update_bytes(&mut hasher, &self.burn.ciphertext);
-        hasher.update(&self.gas_units.to_le_bytes());
-        hasher.update(&self.fee_per_gas.to_le_bytes());
-        *hasher.finalize().as_bytes()
+impl Drop for ReferenceActionWitness {
+    fn drop(&mut self) {
+        self.full_viewing_key.zeroize();
+        self.input_note.zeroize();
+        self.membership_position.zeroize();
+        self.membership_auth_path.zeroize();
+        self.authorization_randomizer.zeroize();
+        self.net_value_trapdoor.zeroize();
+        self.output_authorization_packet.zeroize();
     }
 }
 
-/// Private accounting witness. Recipient/change classification is temporary.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AccountingWitness {
-    /// Private values of consumed VLT notes.
-    pub input_values: Vec<u128>,
-    /// Values sent to external recipients and therefore subject to burn.
-    pub recipient_output_values: Vec<u128>,
-    /// Values returned internally to the spender.
-    pub change_output_values: Vec<u128>,
-    /// Independent 256-bit hiding material for the accounting commitment.
-    pub balance_blinding: [u8; 32],
-    /// Independent 256-bit hiding material for the burn commitment.
-    pub burn_blinding: [u8; 32],
+/// Complete public DKG-result descriptor selected by the transfer effects.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EpochKeyClaim {
+    /// Burn-key epoch.
+    pub epoch: u64,
+    /// Shamir threshold.
+    pub threshold: u16,
+    /// Strictly sorted non-zero participant evaluation points.
+    pub participants: Vec<u16>,
+    /// Feldman coefficient commitments in polynomial-degree order.
+    pub coefficient_commitments: Vec<[u8; 32]>,
 }
 
-/// Private and public data consumed by the zkVM guest.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AccountingClaim {
-    /// Full public transfer envelope.
-    pub public: TransferPublicFields,
-    /// Secret amounts and blindings.
-    pub witness: AccountingWitness,
+/// Private openings shared by conservation, the burn commitment, and ElGamal.
+#[derive(Serialize, Deserialize)]
+pub struct BurnOpeningWitness {
+    /// Circuit-compatible non-zero burn value-commitment trapdoor.
+    pub commitment_trapdoor: [u8; 32],
+    /// Circuit-compatible non-zero threshold-ElGamal randomness.
+    pub encryption_randomness: [u8; 32],
 }
 
-/// Minimal public result committed to the RISC Zero journal.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AccountingJournal {
-    /// Digest recomputed from the full public envelope inside the guest.
+impl Drop for BurnOpeningWitness {
+    fn drop(&mut self) {
+        self.commitment_trapdoor.zeroize();
+        self.encryption_randomness.zeroize();
+    }
+}
+
+/// Exact public effects and private witnesses consumed by the zkVM guest.
+#[derive(Serialize, Deserialize)]
+pub struct TransferV2ReferenceClaim {
+    /// Must equal [`REFERENCE_STATEMENT_VERSION`].
+    pub statement_version: u16,
+    /// Canonical `TransferV2Effects` bytes.
+    pub effects: Vec<u8>,
+    /// Private action witnesses in exact canonical public action order.
+    pub actions: Vec<ReferenceActionWitness>,
+    /// Complete epoch DKG-result descriptor.
+    pub epoch_key: EpochKeyClaim,
+    /// Exact hidden-burn openings.
+    pub burn: BurnOpeningWitness,
+}
+
+/// Minimal public result authenticated by the RISC Zero receipt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TransferV2ReferenceJournal {
+    /// Digest recomputed from canonical effects inside the guest.
     pub public_inputs_digest: [u8; 32],
-    /// Number of consumed private notes.
-    pub input_count: u16,
-    /// Number of created private notes.
-    pub output_count: u16,
-    /// Public gas fee proven to be funded by the private inputs.
+    /// Public padded action count.
+    pub action_count: u16,
+    /// Public gas debit proven funded by the private inputs.
     pub gas_fee: u128,
 }
 
-/// Deterministic rejection reasons shared by native tests and the zkVM guest.
+/// Deterministic native and guest rejection classes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AccountingError {
-    /// The public protocol version is not transfer-v1.
-    UnsupportedVersion,
-    /// Input count is outside transfer-v1 limits.
-    InvalidInputCount,
-    /// Output count is outside transfer-v1 limits.
-    InvalidOutputCount,
-    /// Public and private note counts disagree.
-    CountMismatch,
-    /// A checked addition or multiplication overflowed `u128`.
+pub enum ReferenceError {
+    /// Claim schema version is unknown.
+    UnsupportedStatementVersion,
+    /// Public effects exceed the protocol bound or are not canonical v2 bytes.
+    InvalidEffects,
+    /// Private action witness count or a fixed witness field has another size.
+    InvalidWitnessShape,
+    /// A per-action private relation failed.
+    InvalidAction,
+    /// Checked `u128` accounting overflowed.
     ArithmeticOverflow,
-    /// Private inputs do not fund outputs, burn, and gas exactly.
+    /// Private inputs do not exactly fund outputs, burn, and gas.
     ConservationFailure,
-    /// The public balance commitment does not open to this witness.
-    BalanceCommitmentMismatch,
-    /// The public burn commitment does not open to the exact mandatory burn.
+    /// The supplied DKG result does not match the public scheme/key/epoch.
+    EpochKeyMismatch,
+    /// The public burn commitment does not open to the mandatory burn.
     BurnCommitmentMismatch,
+    /// The public burn ciphertext does not encrypt that burn under the epoch key.
+    BurnCiphertextMismatch,
 }
 
-impl AccountingClaim {
-    /// Executes all accounting constraints and returns the public journal.
-    pub fn validate(&self) -> Result<AccountingJournal, AccountingError> {
-        if self.public.version != TRANSFER_V1_PROTOCOL_VERSION {
-            return Err(AccountingError::UnsupportedVersion);
+impl TransferV2ReferenceClaim {
+    /// Validates the complete transfer-v2 reference statement.
+    pub fn validate(&self) -> Result<TransferV2ReferenceJournal, ReferenceError> {
+        if self.statement_version != REFERENCE_STATEMENT_VERSION {
+            return Err(ReferenceError::UnsupportedStatementVersion);
+        }
+        if self.effects.len() > TRANSFER_V2_MAX_EFFECT_BYTES {
+            return Err(ReferenceError::InvalidEffects);
+        }
+        let effects = TransferV2Effects::decode_canonical(&self.effects)
+            .map_err(|_| ReferenceError::InvalidEffects)?;
+        if self.actions.len() != effects.actions().len() {
+            return Err(ReferenceError::InvalidWitnessShape);
         }
 
-        let input_count = self.witness.input_values.len();
-        if !(1..=MAX_INPUTS).contains(&input_count) {
-            return Err(AccountingError::InvalidInputCount);
+        let mut input_sum = 0_u128;
+        let mut output_sum = 0_u128;
+        let mut taxable_sum = 0_u128;
+        for (public_action, witness) in effects.actions().iter().zip(&self.actions) {
+            let full_viewing_key: [u8; 96] = witness
+                .full_viewing_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| ReferenceError::InvalidWitnessShape)?;
+            let input_note: [u8; PRIVATE_NOTE_BYTES] = witness
+                .input_note
+                .as_slice()
+                .try_into()
+                .map_err(|_| ReferenceError::InvalidWitnessShape)?;
+            let membership_auth_path: [[u8; 32]; NOTE_TREE_DEPTH as usize] = witness
+                .membership_auth_path
+                .as_slice()
+                .try_into()
+                .map_err(|_| ReferenceError::InvalidWitnessShape)?;
+            if witness.output_authorization_packet.len() != OUTPUT_AUTHORIZATION_PACKET_BYTES {
+                return Err(ReferenceError::InvalidWitnessShape);
+            }
+            let values = verify_reference_action(
+                *effects.chain_id().as_bytes(),
+                effects.anchor().to_bytes(),
+                public_action.nullifier(),
+                public_action.randomized_verification_key(),
+                public_action.net_value_commitment(),
+                public_action.output(),
+                full_viewing_key,
+                input_note,
+                witness.membership_position,
+                membership_auth_path,
+                witness.authorization_randomizer,
+                witness.net_value_trapdoor,
+                &witness.output_authorization_packet,
+                MAXIMUM_NATIVE_VALUE,
+            )
+            .map_err(|_| ReferenceError::InvalidAction)?;
+            input_sum = input_sum
+                .checked_add(u128::from(values.input_value()))
+                .ok_or(ReferenceError::ArithmeticOverflow)?;
+            output_sum = output_sum
+                .checked_add(u128::from(values.output_value()))
+                .ok_or(ReferenceError::ArithmeticOverflow)?;
+            taxable_sum = taxable_sum
+                .checked_add(u128::from(values.taxable_output()))
+                .ok_or(ReferenceError::ArithmeticOverflow)?;
         }
 
-        let output_count = self
-            .witness
-            .recipient_output_values
-            .len()
-            .checked_add(self.witness.change_output_values.len())
-            .ok_or(AccountingError::ArithmeticOverflow)?;
-        if !(1..=MAX_OUTPUTS).contains(&output_count) {
-            return Err(AccountingError::InvalidOutputCount);
-        }
-        if input_count != self.public.nullifiers.len() || output_count != self.public.outputs.len()
-        {
-            return Err(AccountingError::CountMismatch);
-        }
-
-        let input_sum = checked_sum(&self.witness.input_values)?;
-        let recipient_sum = checked_sum(&self.witness.recipient_output_values)?;
-        let change_sum = checked_sum(&self.witness.change_output_values)?;
-        let burn = burn_for(recipient_sum);
-        let gas_fee = u128::from(self.public.gas_units)
-            .checked_mul(u128::from(self.public.fee_per_gas))
-            .ok_or(AccountingError::ArithmeticOverflow)?;
-
-        let required = recipient_sum
-            .checked_add(change_sum)
-            .and_then(|value| value.checked_add(burn))
+        let burn = burn_for(taxable_sum);
+        let gas_fee = effects
+            .gas()
+            .total_fee()
+            .map_err(|_| ReferenceError::ArithmeticOverflow)?;
+        let required = output_sum
+            .checked_add(burn)
             .and_then(|value| value.checked_add(gas_fee))
-            .ok_or(AccountingError::ArithmeticOverflow)?;
+            .ok_or(ReferenceError::ArithmeticOverflow)?;
         if input_sum != required {
-            return Err(AccountingError::ConservationFailure);
+            return Err(ReferenceError::ConservationFailure);
+        }
+        let burn = u64::try_from(burn).map_err(|_| ReferenceError::ArithmeticOverflow)?;
+        if burn > MAXIMUM_NATIVE_VALUE {
+            return Err(ReferenceError::ArithmeticOverflow);
         }
 
-        if balance_commitment(&self.public, &self.witness, burn, gas_fee)
-            != self.public.balance_commitment
+        if self.epoch_key.participants.len() > MAX_BURN_PARTICIPANTS {
+            return Err(ReferenceError::InvalidWitnessShape);
+        }
+        let epoch_key = EpochBurnPublicKey::from_parts(
+            self.epoch_key.epoch,
+            self.epoch_key.threshold,
+            self.epoch_key.participants.clone(),
+            self.epoch_key.coefficient_commitments.clone(),
+        )
+        .map_err(|_| ReferenceError::EpochKeyMismatch)?;
+        let public_burn = effects.burn();
+        if public_burn.scheme_id() != BURN_ENCRYPTION_SCHEME_ID
+            || public_burn.key_id() != epoch_key.key_id()
+            || public_burn.epoch() != epoch_key.epoch()
         {
-            return Err(AccountingError::BalanceCommitmentMismatch);
+            return Err(ReferenceError::EpochKeyMismatch);
         }
-        if burn_commitment(burn, &self.witness.burn_blinding) != self.public.burn.commitment {
-            return Err(AccountingError::BurnCommitmentMismatch);
+        if !verifies_reference_burn_commitment(
+            burn,
+            self.burn.commitment_trapdoor,
+            public_burn.commitment(),
+        ) {
+            return Err(ReferenceError::BurnCommitmentMismatch);
+        }
+        let ciphertext = BurnCiphertext::from_bytes(*public_burn.ciphertext())
+            .map_err(|_| ReferenceError::BurnCiphertextMismatch)?;
+        if !ciphertext.verifies_reference_opening(
+            burn,
+            MAXIMUM_NATIVE_VALUE,
+            self.burn.encryption_randomness,
+            &epoch_key,
+        ) {
+            return Err(ReferenceError::BurnCiphertextMismatch);
         }
 
-        Ok(AccountingJournal {
-            public_inputs_digest: self.public.public_inputs_digest(),
-            input_count: u16::try_from(input_count)
-                .map_err(|_| AccountingError::InvalidInputCount)?,
-            output_count: u16::try_from(output_count)
-                .map_err(|_| AccountingError::InvalidOutputCount)?,
+        Ok(TransferV2ReferenceJournal {
+            public_inputs_digest: *effects.public_inputs_digest().as_bytes(),
+            action_count: u16::try_from(effects.actions().len())
+                .map_err(|_| ReferenceError::InvalidWitnessShape)?,
             gas_fee,
         })
     }
 }
 
-/// Exact 0.5% burn, rounded upward to the smallest atomic unit.
+/// Exact ceiling 0.5% burn over the external transfer value.
 #[must_use]
 pub const fn burn_for(taxable_amount: u128) -> u128 {
     let quotient = taxable_amount / 200;
@@ -220,144 +262,18 @@ pub const fn burn_for(taxable_amount: u128) -> u128 {
     quotient + if remainder == 0 { 0 } else { 1 }
 }
 
-/// Research-only BLAKE3 commitment to all accounting values and one blinding.
-///
-/// This is not the final algebraic value commitment and is not homomorphic.
-#[must_use]
-pub fn balance_commitment(
-    public: &TransferPublicFields,
-    witness: &AccountingWitness,
-    burn: u128,
-    gas_fee: u128,
-) -> [u8; 32] {
-    let mut hasher = Hasher::new_derive_key(BALANCE_DOMAIN);
-    update_u128_values(&mut hasher, &witness.input_values);
-    update_u128_values(&mut hasher, &witness.recipient_output_values);
-    update_u128_values(&mut hasher, &witness.change_output_values);
-    hasher.update(&burn.to_le_bytes());
-    hasher.update(&gas_fee.to_le_bytes());
-    hasher.update(&public.gas_units.to_le_bytes());
-    hasher.update(&public.fee_per_gas.to_le_bytes());
-    hasher.update(&witness.balance_blinding);
-    *hasher.finalize().as_bytes()
-}
-
-/// Research-only hiding commitment to the exact mandatory burn.
-#[must_use]
-pub fn burn_commitment(burn: u128, blinding: &[u8; 32]) -> [u8; 32] {
-    let mut hasher = Hasher::new_derive_key(BURN_DOMAIN);
-    hasher.update(&burn.to_le_bytes());
-    hasher.update(blinding);
-    *hasher.finalize().as_bytes()
-}
-
-fn checked_sum(values: &[u128]) -> Result<u128, AccountingError> {
-    values.iter().try_fold(0_u128, |sum, value| {
-        sum.checked_add(*value)
-            .ok_or(AccountingError::ArithmeticOverflow)
-    })
-}
-
-fn update_count(hasher: &mut Hasher, count: usize) {
-    hasher.update(&(count as u64).to_le_bytes());
-}
-
-fn update_bytes(hasher: &mut Hasher, bytes: &[u8]) {
-    update_count(hasher, bytes.len());
-    hasher.update(bytes);
-}
-
-fn update_u128_values(hasher: &mut Hasher, values: &[u128]) {
-    update_count(hasher, values.len());
-    for value in values {
-        hasher.update(&value.to_le_bytes());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn valid_claim() -> AccountingClaim {
-        let witness = AccountingWitness {
-            input_values: vec![10_065],
-            recipient_output_values: vec![10_000],
-            change_output_values: vec![5],
-            balance_blinding: [7; 32],
-            burn_blinding: [9; 32],
-        };
-        let mut public = TransferPublicFields {
-            version: TRANSFER_V1_PROTOCOL_VERSION,
-            chain_id: [1; 32],
-            circuit_id: [2; 32],
-            anchor: [3; 32],
-            nullifiers: vec![[4; 32]],
-            outputs: vec![
-                PublicOutput {
-                    note_commitment: [5; 32],
-                    ephemeral_key: [6; 32],
-                    ciphertext: vec![7],
-                },
-                PublicOutput {
-                    note_commitment: [8; 32],
-                    ephemeral_key: [9; 32],
-                    ciphertext: vec![10],
-                },
-            ],
-            balance_commitment: [0; 32],
-            burn: PublicBurn {
-                commitment: [0; 32],
-                ciphertext: vec![11],
-            },
-            gas_units: 10,
-            fee_per_gas: 1,
-        };
-        let burn = burn_for(10_000);
-        let gas_fee = 10;
-        public.balance_commitment = balance_commitment(&public, &witness, burn, gas_fee);
-        public.burn.commitment = burn_commitment(burn, &witness.burn_blinding);
-        AccountingClaim { public, witness }
-    }
-
     #[test]
-    fn validates_exact_conservation_burn_and_gas() {
-        let journal = valid_claim().validate().expect("valid accounting claim");
-        assert_eq!(journal.input_count, 1);
-        assert_eq!(journal.output_count, 2);
-        assert_eq!(journal.gas_fee, 10);
-    }
-
-    #[test]
-    fn burn_rounds_up_at_atomic_boundaries() {
+    fn burn_rounds_at_every_boundary_class() {
         assert_eq!(burn_for(0), 0);
         assert_eq!(burn_for(1), 1);
         assert_eq!(burn_for(199), 1);
         assert_eq!(burn_for(200), 1);
         assert_eq!(burn_for(201), 2);
-    }
-
-    #[test]
-    fn rejects_value_creation() {
-        let mut claim = valid_claim();
-        claim.witness.input_values[0] -= 1;
-        assert_eq!(claim.validate(), Err(AccountingError::ConservationFailure));
-    }
-
-    #[test]
-    fn rejects_wrong_burn_opening() {
-        let mut claim = valid_claim();
-        claim.public.burn.commitment[0] ^= 1;
-        assert_eq!(
-            claim.validate(),
-            Err(AccountingError::BurnCommitmentMismatch)
-        );
-    }
-
-    #[test]
-    fn public_digest_binds_ciphertexts() {
-        let mut claim = valid_claim();
-        let digest = claim.public.public_inputs_digest();
-        claim.public.outputs[0].ciphertext[0] ^= 1;
-        assert_ne!(claim.public.public_inputs_digest(), digest);
+        assert_eq!(burn_for(399), 2);
+        assert_eq!(burn_for(400), 2);
     }
 }

@@ -5,20 +5,33 @@
 //! crate deliberately has no network fetcher, unauthenticated scan entry point,
 //! volatile production store, or spendable unfinalized-note path. Its first
 //! encrypted transactional ShardTree store is production-intent, not release
-//! ready: approved seed custody, trusted birthday/target distribution, recovery
-//! policy beyond the bounded account range, migrations, platform key storage,
-//! crash injection, access-pattern benchmarks, and independent review remain H1
-//! activation gates.
+//! ready: platform seed-entry/custody ceremony, trusted birthday/target
+//! distribution, recovery policy beyond the bounded account range, real
+//! platform key storage, external
+//! power/storage fault execution, access-pattern acceptance, and independent
+//! review remain H1 activation gates. The historical schema-1 to schema-2
+//! migration is explicit, backup-first, and fail-closed; checkpoint retention
+//! and validated compaction are bounded production interfaces.
 
+mod custody;
 mod recovery;
+mod seed;
 mod storage;
+
+pub use custody::{
+    RollbackProtectedWalletDb, WalletRollbackAnchor, WalletRollbackError, WalletRollbackState,
+    WalletRollbackStateError, WalletRootKey, WalletRootKeyError, WalletRootKeyStore,
+    WalletSecureRollbackStore,
+};
 
 pub use recovery::{
     FinalizedRecoverySource, MAX_RECOVERY_BLOCKS_PER_ADVANCE, WalletRecoveryAdvance,
     WalletRecoveryCoordinatorError, WalletRecoveryCoordinatorFailure, advance_seed_recovery,
 };
+pub use seed::{WalletMnemonic, WalletMnemonicError, WalletMnemonicPassphrase, WalletSeed};
 pub use storage::{
-    EncryptedWalletDb, WalletBackupSummary, WalletDatabaseConfig, WalletDbError, WalletSpendWitness,
+    EncryptedWalletDb, WalletBackupSummary, WalletCompactionSummary, WalletDatabaseConfig,
+    WalletDbError, WalletRestoreDrillSummary, WalletSpendWitness,
 };
 
 use core::fmt;
@@ -247,7 +260,20 @@ impl fmt::Debug for WalletRecoveryAccounts {
 }
 
 impl WalletRecoveryAccounts {
+    /// Derives accounts from the checked BIP-39 import boundary.
+    pub fn derive_from_wallet_seed(
+        seed: &WalletSeed,
+        chain_id: ChainId,
+        account_count: usize,
+    ) -> Result<Self, WalletRecoveryError> {
+        Self::derive(seed.as_bytes(), chain_id, account_count)
+    }
+
     /// Derives a contiguous, globally bounded account range from seed material.
+    ///
+    /// Direct callers must supply already high-entropy binary material. User
+    /// passwords or unchecked mnemonic text are forbidden; product imports use
+    /// `WalletMnemonic` and `derive_from_wallet_seed`.
     pub fn derive(
         seed: &[u8],
         chain_id: ChainId,
@@ -696,6 +722,101 @@ pub enum WalletRecoveryStatus {
 impl fmt::Debug for WalletRecoveryStatus {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("WalletRecoveryStatus(REDACTED)")
+    }
+}
+
+/// Fail-closed product state derived from authenticated recovery progress.
+///
+/// `Ready` means only that the seed-recovery gate permits a final balance and
+/// spending. The application must still establish current finalized sync
+/// through its separately reviewed H2 node or light-client boundary.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum WalletRecoveryProductState {
+    /// Recovery is either unnecessary (genesis origin) or fully complete.
+    Ready,
+    /// The exact target has not yet been reached; balances are provisional.
+    Scanning {
+        /// Last atomically committed recovery height.
+        scanned_height: u64,
+        /// Exact finalized height recovery must reach.
+        target_height: u64,
+    },
+    /// Recovery must restart from the same conservative birthday with more
+    /// contiguous accounts, within the currently supported bound.
+    RestartWithLargerAccountRange {
+        /// Account count used by the failed-closed pass.
+        previous_account_count: u8,
+        /// Smallest count that can satisfy the configured trailing gap given
+        /// the highest observed account.
+        minimum_account_count: u32,
+    },
+    /// The observed account plus trailing gap exceeds the reviewed 64-account
+    /// implementation. The product must stop instead of proposing another
+    /// unsupported rescan.
+    UnsupportedAccountRange {
+        /// Smallest count required by the authenticated recovery result.
+        minimum_account_count: u32,
+        /// Maximum contiguous account count supported by this build.
+        supported_account_count: u8,
+    },
+}
+
+impl fmt::Debug for WalletRecoveryProductState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("WalletRecoveryProductState(REDACTED)")
+    }
+}
+
+impl WalletRecoveryProductState {
+    /// Whether the recovery gate permits presentation of a final balance.
+    #[must_use]
+    pub const fn permits_final_balance(self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    /// Whether the recovery gate permits release of spend witnesses.
+    #[must_use]
+    pub const fn permits_spending(self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
+impl WalletRecoveryStatus {
+    /// Maps authenticated storage state into the mandatory product behavior.
+    #[must_use]
+    pub const fn product_state(self) -> WalletRecoveryProductState {
+        match self {
+            Self::NotRequired | Self::Complete { .. } => WalletRecoveryProductState::Ready,
+            Self::InProgress {
+                scanned_height,
+                target_height,
+                ..
+            } => WalletRecoveryProductState::Scanning {
+                scanned_height,
+                target_height,
+            },
+            Self::RequiresLargerAccountRange {
+                account_count,
+                highest_used_account,
+                gap_limit,
+                ..
+            } => {
+                let minimum_account_count = highest_used_account
+                    .saturating_add(1)
+                    .saturating_add(gap_limit as u32);
+                if minimum_account_count <= MAX_SCAN_ACCOUNTS as u32 {
+                    WalletRecoveryProductState::RestartWithLargerAccountRange {
+                        previous_account_count: account_count,
+                        minimum_account_count,
+                    }
+                } else {
+                    WalletRecoveryProductState::UnsupportedAccountRange {
+                        minimum_account_count,
+                        supported_account_count: MAX_SCAN_ACCOUNTS as u8,
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -12,11 +12,12 @@
 //! The transfer circuit must prove these equations with the same hidden burn
 //! used by conservation and the burn commitment.
 //!
-//! This crate validates a DKG result and implements zeroized secret-share
-//! import, publicly verifiable aggregate decryption shares, and interpolation.
-//! It does not implement the DKG network protocol, consensus publication, or
-//! bounded discrete-log recovery. Those remain prerequisites before activation
-//! with real funds.
+//! This crate validates a DKG result and implements canonical privacy-gated
+//! aggregate formation, zeroized secret-share import, publicly verifiable
+//! aggregate decryption shares, interpolation, and bounded discrete-log
+//! recovery. It does not implement the DKG network protocol, consensus
+//! publication/finality, or epoch scheduling. Those remain later integration
+//! and activation prerequisites.
 
 use std::fmt;
 
@@ -29,11 +30,21 @@ use pasta_curves::{
 use rand_core::{CryptoRng, RngCore};
 use zeroize::{Zeroize, Zeroizing};
 
+mod aggregation;
+
+pub use aggregation::{
+    BURN_AGGREGATION_POLICY_ID, BoundedBurnRecovery, BurnAggregateContribution,
+    BurnAggregateReadiness, BurnRecoveryCacheError, EpochBurnAggregate,
+    MAX_BURN_AGGREGATE_CONTRIBUTIONS, MAX_EPOCH_BURN_ATOMIC, MIN_BURN_AGGREGATE_CONTRIBUTIONS,
+    MIN_BURN_AGGREGATE_WINDOWS, OpenableBurnAggregate, burn_aggregation_policy_id,
+    recover_aggregate_burn,
+};
+
 #[cfg(test)]
 const SCHEME_ID_DOMAIN: &str = "vault.burn.pallas-threshold-elgamal-v1.id.2026-08-22";
 const KEY_ID_DOMAIN: &str = "vault.burn.pallas-threshold-elgamal-v1.epoch-key.2026-08-22";
 const DECRYPTION_SHARE_DOMAIN: &str =
-    "vault.burn.pallas-threshold-elgamal-v1.decryption-share.2026-08-22";
+    "vault.burn.pallas-threshold-elgamal-v1.aggregate-decryption-share.v1";
 const MESSAGE_GENERATOR_DOMAIN: &str = "vault.burn.pallas-threshold-elgamal-v1.message";
 const MESSAGE_GENERATOR_INPUT: &[u8] = b"VLT burn amount generator";
 const MAXIMUM_RANDOMNESS_ATTEMPTS: usize = 1 << 16;
@@ -71,6 +82,20 @@ pub enum BurnEncryptionError {
     InvalidDecryptionShare,
     /// Decryption did not contain exactly the sorted threshold subset.
     InvalidDecryptionShareSet,
+    /// Contribution identity, key binding, window, or canonical order is invalid.
+    InvalidAggregateContribution,
+    /// Aggregate contribution storage would exceed its fixed bound.
+    AggregateCapacityExceeded,
+    /// Settlement windows are stale, decreasing, or do not cover contributions.
+    InvalidSettlementWindow,
+    /// The public anonymity and window floors have not both been met.
+    AggregateNotOpenable,
+    /// A requested recovery bound exceeds the complete VLT supply bound.
+    RecoveryBoundOutOfRange,
+    /// The bounded recovery table could not reserve its declared resources.
+    RecoveryResourcesUnavailable,
+    /// The decrypted group message has no integer inside the recovery interval.
+    AggregateBurnOutOfRange,
 }
 
 impl fmt::Display for BurnEncryptionError {
@@ -86,6 +111,13 @@ impl fmt::Display for BurnEncryptionError {
             Self::InvalidSecretShare => "invalid epoch burn secret share",
             Self::InvalidDecryptionShare => "invalid burn decryption share",
             Self::InvalidDecryptionShareSet => "invalid burn decryption share set",
+            Self::InvalidAggregateContribution => "invalid burn aggregate contribution",
+            Self::AggregateCapacityExceeded => "burn aggregate capacity exceeded",
+            Self::InvalidSettlementWindow => "invalid burn aggregate settlement window",
+            Self::AggregateNotOpenable => "burn aggregate privacy floors are not met",
+            Self::RecoveryBoundOutOfRange => "burn recovery bound exceeds monetary policy",
+            Self::RecoveryResourcesUnavailable => "burn recovery resources are unavailable",
+            Self::AggregateBurnOutOfRange => "aggregate burn is outside the recovery interval",
         };
         formatter.write_str(message)
     }
@@ -279,9 +311,12 @@ impl EpochBurnSecretShare {
     pub fn create_decryption_share<R: RngCore + CryptoRng>(
         &self,
         epoch_key: &EpochBurnPublicKey,
-        ciphertext: AggregatedBurnCiphertext,
+        aggregate: &OpenableBurnAggregate,
         rng: &mut R,
     ) -> Result<BurnDecryptionShare, BurnEncryptionError> {
+        if aggregate.epoch() != epoch_key.epoch() || aggregate.key_id() != epoch_key.key_id() {
+            return Err(BurnEncryptionError::InvalidAggregateContribution);
+        }
         let scalar = parse_scalar(&self.scalar)?;
         let verification_key = parse_point(
             &epoch_key
@@ -291,7 +326,7 @@ impl EpochBurnSecretShare {
         if (pallas::Point::generator() * scalar) != verification_key {
             return Err(BurnEncryptionError::InvalidSecretShare);
         }
-        let (c1, _) = ciphertext.points();
+        let (c1, _) = aggregate.ciphertext().points();
         let share = c1 * scalar;
 
         for _ in 0..MAXIMUM_RANDOMNESS_ATTEMPTS {
@@ -303,7 +338,7 @@ impl EpochBurnSecretShare {
             let announcement_c1 = c1 * nonce;
             let challenge = decryption_share_challenge(
                 epoch_key,
-                ciphertext,
+                aggregate,
                 self.participant,
                 verification_key,
                 share,
@@ -352,6 +387,43 @@ impl BurnCiphertext {
         self.0
     }
 
+    /// Checks an exact amount/randomness opening for the isolated zkVM
+    /// reference statement.
+    ///
+    /// This is feature-gated out of normal protocol builds; the activatable
+    /// specialized path proves the same equations inside Halo2.
+    #[cfg(feature = "reference-oracle")]
+    #[must_use]
+    pub fn verifies_reference_opening(
+        self,
+        amount: u64,
+        maximum_amount: u64,
+        randomness_bytes: [u8; 32],
+        epoch_key: &EpochBurnPublicKey,
+    ) -> bool {
+        if amount > maximum_amount {
+            return false;
+        }
+        let Some(randomness_base) =
+            Option::<pallas::Base>::from(pallas::Base::from_repr(randomness_bytes))
+                .filter(|value| !bool::from(value.is_zero()))
+        else {
+            return false;
+        };
+        let Some(randomness) =
+            Option::<pallas::Scalar>::from(pallas::Scalar::from_repr(randomness_base.to_repr()))
+        else {
+            return false;
+        };
+        let expected_c1 = pallas::Point::generator() * randomness;
+        let expected_c2 = burn_message_generator() * pallas::Scalar::from(amount)
+            + epoch_key.encryption_point() * randomness;
+        if bool::from(expected_c2.is_identity()) {
+            return false;
+        }
+        self.points() == (expected_c1, expected_c2)
+    }
+
     fn points(self) -> (pallas::Point, pallas::Point) {
         (
             parse_ciphertext_point(&self.0[..32].try_into().expect("fixed slice length"))
@@ -382,6 +454,52 @@ impl Drop for PreparedBurnCiphertext {
 }
 
 impl PreparedBurnCiphertext {
+    /// Reconstructs one exact delegated-proving randomness witness and checks
+    /// it against the public epoch key and ciphertext.
+    pub fn from_proving_witness(
+        amount: u64,
+        maximum_amount: u64,
+        epoch_key: &EpochBurnPublicKey,
+        mut randomness_bytes: [u8; 32],
+        expected_ciphertext: BurnCiphertext,
+    ) -> Result<Self, BurnEncryptionError> {
+        if amount > maximum_amount {
+            randomness_bytes.zeroize();
+            return Err(BurnEncryptionError::AmountOutOfRange);
+        }
+        if randomness_bytes == [0; 32] {
+            randomness_bytes.zeroize();
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        }
+        let base = Option::<pallas::Base>::from(pallas::Base::from_repr(randomness_bytes));
+        let scalar = Option::<pallas::Scalar>::from(pallas::Scalar::from_repr(randomness_bytes));
+        let Some(randomness) = scalar.filter(|value| !bool::from(value.is_zero())) else {
+            randomness_bytes.zeroize();
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        };
+        if base.is_none() {
+            randomness_bytes.zeroize();
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        }
+        let c1 = pallas::Point::generator() * randomness;
+        let c2 = burn_message_generator() * pallas::Scalar::from(amount)
+            + epoch_key.encryption_point() * randomness;
+        if bool::from(c2.is_identity()) {
+            randomness_bytes.zeroize();
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        }
+        let ciphertext = BurnCiphertext::from_bytes(encode_points(c1, c2))?;
+        if ciphertext != expected_ciphertext {
+            randomness_bytes.zeroize();
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        }
+        Ok(Self {
+            amount,
+            randomness: Zeroizing::new(randomness_bytes),
+            ciphertext,
+        })
+    }
+
     /// Encrypts an amount under the exact epoch key with fresh non-zero
     /// randomness. `maximum_amount` must match the activated monetary bound.
     pub fn encrypt<R: RngCore + CryptoRng>(
@@ -558,8 +676,11 @@ impl BurnDecryptionShare {
     pub fn verify(
         &self,
         epoch_key: &EpochBurnPublicKey,
-        ciphertext: AggregatedBurnCiphertext,
+        aggregate: &OpenableBurnAggregate,
     ) -> bool {
+        if aggregate.epoch() != epoch_key.epoch() || aggregate.key_id() != epoch_key.key_id() {
+            return false;
+        }
         let Some(verification_key) = epoch_key
             .participant_verification_key(self.participant)
             .and_then(|bytes| parse_point(&bytes).ok())
@@ -575,12 +696,12 @@ impl BurnDecryptionShare {
         let Ok(response) = parse_scalar(&self.response) else {
             return false;
         };
-        let (c1, _) = ciphertext.points();
+        let (c1, _) = aggregate.ciphertext().points();
         let announcement_g = pallas::Point::generator() * response - verification_key * challenge;
         let announcement_c1 = c1 * response - share * challenge;
         decryption_share_challenge(
             epoch_key,
-            ciphertext,
+            aggregate,
             self.participant,
             verification_key,
             share,
@@ -614,18 +735,20 @@ impl RecoveredBurnMessage {
 
 /// Verifies exactly `threshold` sorted shares, interpolates them at zero, and
 /// removes the aggregate ElGamal mask.
-pub fn recover_aggregate_message(
+pub(crate) fn recover_aggregate_message(
     epoch_key: &EpochBurnPublicKey,
-    ciphertext: AggregatedBurnCiphertext,
+    aggregate: &OpenableBurnAggregate,
     shares: &[BurnDecryptionShare],
 ) -> Result<RecoveredBurnMessage, BurnEncryptionError> {
-    if shares.len() != usize::from(epoch_key.threshold)
+    if aggregate.epoch() != epoch_key.epoch()
+        || aggregate.key_id() != epoch_key.key_id()
+        || shares.len() != usize::from(epoch_key.threshold)
         || shares
             .windows(2)
             .any(|pair| pair[0].participant >= pair[1].participant)
         || shares
             .iter()
-            .any(|share| !share.verify(epoch_key, ciphertext))
+            .any(|share| !share.verify(epoch_key, aggregate))
     {
         return Err(BurnEncryptionError::InvalidDecryptionShareSet);
     }
@@ -651,7 +774,7 @@ pub fn recover_aggregate_message(
         mask += share_point * lagrange;
     }
 
-    let (_, c2) = ciphertext.points();
+    let (_, c2) = aggregate.ciphertext().points();
     Ok(RecoveredBurnMessage((c2 - mask).to_bytes()))
 }
 
@@ -704,7 +827,7 @@ fn parse_scalar(bytes: &[u8; 32]) -> Result<pallas::Scalar, BurnEncryptionError>
 #[allow(clippy::too_many_arguments)]
 fn decryption_share_challenge(
     epoch_key: &EpochBurnPublicKey,
-    ciphertext: AggregatedBurnCiphertext,
+    aggregate: &OpenableBurnAggregate,
     participant: u16,
     verification_key: pallas::Point,
     share: pallas::Point,
@@ -714,7 +837,8 @@ fn decryption_share_challenge(
     let mut hasher = blake3::Hasher::new_derive_key(DECRYPTION_SHARE_DOMAIN);
     hasher.update(&BURN_ENCRYPTION_SCHEME_ID);
     hasher.update(&epoch_key.key_id);
-    hasher.update(&ciphertext.0);
+    hasher.update(&aggregate.aggregate_id());
+    hasher.update(&aggregate.ciphertext_bytes());
     hasher.update(&participant.to_le_bytes());
     hasher.update(&verification_key.to_bytes());
     hasher.update(&share.to_bytes());
@@ -804,6 +928,54 @@ mod tests {
         ))
         .unwrap();
         c2 - c1 * secret
+    }
+
+    fn effect_id(index: u64) -> [u8; 32] {
+        let mut id = [0; 32];
+        id[..8].copy_from_slice(&index.to_le_bytes());
+        id[31] = 0xa4;
+        id
+    }
+
+    fn openable_aggregate(
+        key: &EpochBurnPublicKey,
+        nonzero_amounts: &[u64],
+    ) -> OpenableBurnAggregate {
+        openable_aggregate_with_offset(key, nonzero_amounts, 0)
+    }
+
+    fn openable_aggregate_with_offset(
+        key: &EpochBurnPublicKey,
+        nonzero_amounts: &[u64],
+        effect_id_offset: u64,
+    ) -> OpenableBurnAggregate {
+        let mut encryption_rng = ChaCha20Rng::from_seed([0x83; 32]);
+        let contributions = (0..MIN_BURN_AGGREGATE_CONTRIBUTIONS)
+            .map(|index| {
+                let amount = nonzero_amounts.get(index).copied().unwrap_or(0);
+                let prepared = PreparedBurnCiphertext::encrypt(
+                    amount,
+                    MAXIMUM_AMOUNT,
+                    key,
+                    &mut encryption_rng,
+                )
+                .unwrap();
+                BurnAggregateContribution::new(
+                    effect_id(effect_id_offset + index as u64 + 1),
+                    100 + index as u64 % MIN_BURN_AGGREGATE_WINDOWS,
+                    key,
+                    prepared.ciphertext(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut aggregate = EpochBurnAggregate::new(key, 100);
+        aggregate.append(&contributions).unwrap();
+        assert_eq!(
+            aggregate.close_through(115).unwrap(),
+            BurnAggregateReadiness::Ready
+        );
+        aggregate.into_openable().unwrap()
     }
 
     #[test]
@@ -903,44 +1075,71 @@ mod tests {
     #[test]
     fn dleq_shares_verify_and_recover_only_the_aggregate_message() {
         let (key, coefficients) = epoch_key();
-        let mut encryption_rng = ChaCha20Rng::from_seed([0x83; 32]);
-        let first =
-            PreparedBurnCiphertext::encrypt(50, MAXIMUM_AMOUNT, &key, &mut encryption_rng).unwrap();
-        let second =
-            PreparedBurnCiphertext::encrypt(25, MAXIMUM_AMOUNT, &key, &mut encryption_rng).unwrap();
-        let aggregate =
-            AggregatedBurnCiphertext::aggregate(&[first.ciphertext(), second.ciphertext()])
-                .unwrap();
+        let aggregate = openable_aggregate(&key, &[50, 25]);
 
         let scalar_for = |participant: u16| {
             coefficients[0] + coefficients[1] * pallas::Scalar::from(u64::from(participant))
         };
         let secret_1 = EpochBurnSecretShare::from_bytes(1, scalar_for(1).to_repr(), &key).unwrap();
         let secret_2 = EpochBurnSecretShare::from_bytes(2, scalar_for(2).to_repr(), &key).unwrap();
+        let secret_3 = EpochBurnSecretShare::from_bytes(3, scalar_for(3).to_repr(), &key).unwrap();
         let mut share_rng_1 = ChaCha20Rng::from_seed([0x84; 32]);
         let mut share_rng_2 = ChaCha20Rng::from_seed([0x85; 32]);
+        let mut share_rng_3 = ChaCha20Rng::from_seed([0x89; 32]);
         let share_1 = secret_1
-            .create_decryption_share(&key, aggregate, &mut share_rng_1)
+            .create_decryption_share(&key, &aggregate, &mut share_rng_1)
             .unwrap();
         let share_2 = secret_2
-            .create_decryption_share(&key, aggregate, &mut share_rng_2)
+            .create_decryption_share(&key, &aggregate, &mut share_rng_2)
+            .unwrap();
+        let share_3 = secret_3
+            .create_decryption_share(&key, &aggregate, &mut share_rng_3)
             .unwrap();
 
-        assert!(share_1.verify(&key, aggregate));
-        assert!(share_2.verify(&key, aggregate));
-        let recovered = recover_aggregate_message(&key, aggregate, &[share_1, share_2]).unwrap();
+        assert!(share_1.verify(&key, &aggregate));
+        assert!(share_2.verify(&key, &aggregate));
+        let different_membership = openable_aggregate_with_offset(&key, &[50, 25], 1_000);
+        assert_eq!(
+            aggregate.ciphertext_bytes(),
+            different_membership.ciphertext_bytes()
+        );
+        assert_ne!(
+            aggregate.aggregate_id(),
+            different_membership.aggregate_id()
+        );
+        assert!(!share_1.verify(&key, &different_membership));
+        let recovered = recover_aggregate_message(&key, &aggregate, &[share_1, share_2]).unwrap();
         assert!(recovered.matches_amount(75));
         assert!(!recovered.matches_amount(74));
+        let recovery = BoundedBurnRecovery::new(100).unwrap();
+        assert_eq!(
+            recover_aggregate_burn(&key, &aggregate, &[share_1, share_2], &recovery).unwrap(),
+            75
+        );
 
         let mut tampered = share_1;
         tampered.response[0] ^= 1;
-        assert!(!tampered.verify(&key, aggregate));
+        assert!(!tampered.verify(&key, &aggregate));
         assert_eq!(
-            recover_aggregate_message(&key, aggregate, &[share_2, share_1]),
+            recover_aggregate_burn(
+                &key,
+                &aggregate,
+                &[tampered, share_3, share_2, share_1, share_1],
+                &recovery,
+            )
+            .unwrap(),
+            75
+        );
+        assert_eq!(
+            recover_aggregate_burn(&key, &aggregate, &[tampered, share_1], &recovery),
             Err(BurnEncryptionError::InvalidDecryptionShareSet)
         );
         assert_eq!(
-            recover_aggregate_message(&key, aggregate, &[share_1]),
+            recover_aggregate_message(&key, &aggregate, &[share_2, share_1]),
+            Err(BurnEncryptionError::InvalidDecryptionShareSet)
+        );
+        assert_eq!(
+            recover_aggregate_message(&key, &aggregate, &[share_1]),
             Err(BurnEncryptionError::InvalidDecryptionShareSet)
         );
         assert_eq!(
@@ -948,5 +1147,181 @@ mod tests {
                 .unwrap_err(),
             BurnEncryptionError::InvalidSecretShare
         );
+    }
+
+    #[test]
+    fn privacy_floors_carry_forward_without_an_individual_decryption_path() {
+        let (key, _) = epoch_key();
+        let mut rng = ChaCha20Rng::from_seed([0x86; 32]);
+        let prepared = PreparedBurnCiphertext::encrypt(25, MAXIMUM_AMOUNT, &key, &mut rng).unwrap();
+        let contribution =
+            BurnAggregateContribution::new(effect_id(1), 200, &key, prepared.ciphertext()).unwrap();
+        let mut aggregate = EpochBurnAggregate::new(&key, 200);
+        aggregate.append(&[contribution]).unwrap();
+        assert_eq!(
+            aggregate.close_through(215).unwrap(),
+            BurnAggregateReadiness::CarryForward
+        );
+        assert_eq!(aggregate.closed_through(), Some(215));
+        assert_eq!(
+            aggregate.clone().into_openable(),
+            Err(BurnEncryptionError::AggregateNotOpenable)
+        );
+
+        let stale =
+            BurnAggregateContribution::new(effect_id(2), 215, &key, prepared.ciphertext()).unwrap();
+        assert_eq!(
+            aggregate.append(&[stale]),
+            Err(BurnEncryptionError::InvalidAggregateContribution)
+        );
+        assert_eq!(
+            aggregate.close_through(231).unwrap(),
+            BurnAggregateReadiness::CarryForward
+        );
+    }
+
+    #[test]
+    fn aggregate_formation_is_atomic_canonical_and_bounded() {
+        let (key, _) = epoch_key();
+        let mut rng = ChaCha20Rng::from_seed([0x87; 32]);
+        let prepared = PreparedBurnCiphertext::encrypt(1, MAXIMUM_AMOUNT, &key, &mut rng).unwrap();
+        let contribution =
+            BurnAggregateContribution::new(effect_id(1), 300, &key, prepared.ciphertext()).unwrap();
+        let mut aggregate = EpochBurnAggregate::new(&key, 300);
+        assert_eq!(
+            aggregate.append(&[contribution, contribution]),
+            Err(BurnEncryptionError::InvalidAggregateContribution)
+        );
+        assert_eq!(aggregate.contribution_count(), 0);
+
+        let other_coefficients = [pallas::Scalar::from(13), pallas::Scalar::from(17)];
+        let other_commitments = other_coefficients
+            .map(|coefficient| (pallas::Point::generator() * coefficient).to_bytes());
+        let other_key =
+            EpochBurnPublicKey::from_parts(10, 2, vec![1, 2, 3], other_commitments.to_vec())
+                .unwrap();
+        let wrong_key =
+            BurnAggregateContribution::new(effect_id(2), 300, &other_key, prepared.ciphertext())
+                .unwrap();
+        assert_eq!(
+            aggregate.append(&[wrong_key]),
+            Err(BurnEncryptionError::InvalidAggregateContribution)
+        );
+
+        let excessive = (0..=MAX_BURN_AGGREGATE_CONTRIBUTIONS)
+            .map(|index| {
+                BurnAggregateContribution::new(
+                    effect_id(index as u64 + 1),
+                    300,
+                    &key,
+                    prepared.ciphertext(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            aggregate.append(&excessive),
+            Err(BurnEncryptionError::AggregateCapacityExceeded)
+        );
+        assert_eq!(aggregate.contribution_count(), 0);
+    }
+
+    #[test]
+    fn both_cardinality_and_window_span_are_required_before_opening() {
+        let (key, _) = epoch_key();
+        let mut rng = ChaCha20Rng::from_seed([0x88; 32]);
+        let prepared = PreparedBurnCiphertext::encrypt(1, MAXIMUM_AMOUNT, &key, &mut rng).unwrap();
+        let first_batch = (0..MIN_BURN_AGGREGATE_CONTRIBUTIONS - 1)
+            .map(|index| {
+                BurnAggregateContribution::new(
+                    effect_id(index as u64 + 1),
+                    500 + index as u64 % MIN_BURN_AGGREGATE_WINDOWS,
+                    &key,
+                    prepared.ciphertext(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut aggregate = EpochBurnAggregate::new(&key, 500);
+        aggregate.append(&first_batch).unwrap();
+        assert_eq!(
+            aggregate.close_through(515).unwrap(),
+            BurnAggregateReadiness::CarryForward
+        );
+
+        let last = BurnAggregateContribution::new(
+            effect_id(MIN_BURN_AGGREGATE_CONTRIBUTIONS as u64),
+            516,
+            &key,
+            prepared.ciphertext(),
+        )
+        .unwrap();
+        aggregate.append(&[last]).unwrap();
+        assert_eq!(
+            aggregate.close_through(516).unwrap(),
+            BurnAggregateReadiness::Ready
+        );
+        assert_eq!(
+            aggregate.into_openable().unwrap().contribution_count(),
+            MIN_BURN_AGGREGATE_CONTRIBUTIONS
+        );
+
+        let same_window = (0..MIN_BURN_AGGREGATE_CONTRIBUTIONS)
+            .map(|index| {
+                BurnAggregateContribution::new(
+                    effect_id(10_000 + index as u64),
+                    600,
+                    &key,
+                    prepared.ciphertext(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut delayed = EpochBurnAggregate::new(&key, 600);
+        delayed.append(&same_window).unwrap();
+        assert_eq!(
+            delayed.close_through(614).unwrap(),
+            BurnAggregateReadiness::CarryForward
+        );
+        assert_eq!(
+            delayed.close_through(615).unwrap(),
+            BurnAggregateReadiness::Ready
+        );
+    }
+
+    #[test]
+    fn aggregate_identity_and_recovery_interval_are_deterministic() {
+        let (key, _) = epoch_key();
+        let aggregate = openable_aggregate(&key, &[50, 25]);
+        assert_eq!(aggregate.contribution_count(), 128);
+        assert_eq!(
+            aggregate.aggregate_id(),
+            [
+                0xaf, 0x94, 0x0d, 0x50, 0x41, 0xdc, 0xec, 0x18, 0x84, 0x17, 0x52, 0x66, 0x0c, 0x56,
+                0x74, 0xaf, 0xa3, 0xe7, 0xb8, 0x9e, 0x05, 0x46, 0xc6, 0x35, 0x96, 0x38, 0x8c, 0x15,
+                0xee, 0xa5, 0x04, 0xd4,
+            ]
+        );
+
+        let recovery = BoundedBurnRecovery::new(1_000).unwrap();
+        assert_eq!(recovery.maximum(), 1_000);
+        assert_eq!(recovery.step_size(), 32);
+        for amount in [0, 1, 31, 32, 999, 1_000] {
+            let message = RecoveredBurnMessage(
+                (burn_message_generator() * pallas::Scalar::from(amount)).to_bytes(),
+            );
+            assert_eq!(recovery.recover(message).unwrap(), amount);
+        }
+        let outside = RecoveredBurnMessage(
+            (burn_message_generator() * pallas::Scalar::from(1_001)).to_bytes(),
+        );
+        assert_eq!(
+            recovery.recover(outside),
+            Err(BurnEncryptionError::AggregateBurnOutOfRange)
+        );
+        assert!(matches!(
+            BoundedBurnRecovery::new(MAX_EPOCH_BURN_ATOMIC + 1),
+            Err(BurnEncryptionError::RecoveryBoundOutOfRange)
+        ));
     }
 }

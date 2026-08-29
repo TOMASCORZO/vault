@@ -1,5 +1,5 @@
 [package]
-name = "vault-zk-accounting-methods"
+name = "vault-zk-transfer-methods"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,4 +13,3 @@ methods = ["guest"]
 
 [lints]
 workspace = true
-

@@ -1,11 +1,10 @@
 use risc0_zkvm::guest::env;
-use vault_zk_accounting_core::AccountingClaim;
+use vault_zk_transfer_core::TransferV2ReferenceClaim;
 
 fn main() {
-    let claim: AccountingClaim = env::read();
+    let claim: TransferV2ReferenceClaim = env::read();
     let journal = claim
         .validate()
-        .expect("Vault accounting constraints rejected the private witness");
+        .expect("Vault transfer-v2 reference constraints rejected the private witness");
     env::commit(&journal);
 }
-

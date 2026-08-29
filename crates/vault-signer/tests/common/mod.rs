@@ -1,9 +1,21 @@
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 use tempfile::tempdir;
 use vault_signer::{
-    EncryptedPeerRegistry, PeerRegistryId, PeerRegistryScope, PeerRegistryStorageKey,
-    SignerPairingHandshake, SignerPairingRole, SignerTransport, SignerTransportKeyPair,
+    EncryptedPeerRegistry, PairingConfirmationFacts, PairingFingerprint, PeerRegistryId,
+    PeerRegistryScope, PeerRegistryStorageKey, SignerConfirmationError, SignerPairingHandshake,
+    SignerPairingRole, SignerTransport, SignerTransportKeyPair, TrustedPairingConfirmation,
 };
+
+struct TestPairingConfirmation(PairingFingerprint);
+
+impl TrustedPairingConfirmation for TestPairingConfirmation {
+    fn confirm_pairing(
+        &mut self,
+        _facts: &PairingConfirmationFacts,
+    ) -> Result<PairingFingerprint, SignerConfirmationError> {
+        Ok(self.0)
+    }
+}
 
 pub fn paired_transport(seed: [u8; 32], network: [u8; 32]) -> (SignerTransport, SignerTransport) {
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -22,8 +34,12 @@ pub fn paired_transport(seed: [u8; 32], network: [u8; 32]) -> (SignerTransport, 
     let signer_pairing = signer_pairing.finish().unwrap();
     let fingerprint = coordinator_pairing.fingerprint();
     assert_eq!(fingerprint, signer_pairing.fingerprint());
-    let coordinator_record = coordinator_pairing.confirm(fingerprint).unwrap();
-    let signer_record = signer_pairing.confirm(fingerprint).unwrap();
+    let coordinator_record = coordinator_pairing
+        .confirm(&mut TestPairingConfirmation(fingerprint))
+        .unwrap();
+    let signer_record = signer_pairing
+        .confirm(&mut TestPairingConfirmation(fingerprint))
+        .unwrap();
 
     let coordinator_directory = tempdir().unwrap();
     let signer_directory = tempdir().unwrap();

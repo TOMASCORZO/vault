@@ -4,12 +4,38 @@ use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 use tempfile::tempdir;
 use vault_signer::{
     ENCRYPTED_PEER_REGISTRY_BYTES, EncryptedPeerRegistry, PAIRED_SIGNER_RECORD_BYTES,
-    PairedSignerRecord, PairingFingerprint, PeerRegistryError, PeerRegistryId, PeerRegistryScope,
-    PeerRegistryStorageKey, SignerPairingError, SignerPairingHandshake, SignerPairingRole,
-    SignerTransportKeyPair, SignerTransportMessageKind,
+    PairedSignerRecord, PairingConfirmationFacts, PairingFingerprint, PeerRegistryError,
+    PeerRegistryId, PeerRegistryScope, PeerRegistryStorageKey, SignerConfirmationError,
+    SignerPairingError, SignerPairingHandshake, SignerPairingRole, SignerTransportKeyPair,
+    SignerTransportMessageKind, TrustedPairingConfirmation, UnconfirmedSignerPairing,
 };
 
 const NETWORK: [u8; 32] = [0x31; 32];
+
+struct TestPairingConfirmation {
+    observed: PairingFingerprint,
+    facts: Vec<PairingConfirmationFacts>,
+}
+
+impl TrustedPairingConfirmation for TestPairingConfirmation {
+    fn confirm_pairing(
+        &mut self,
+        facts: &PairingConfirmationFacts,
+    ) -> Result<PairingFingerprint, SignerConfirmationError> {
+        self.facts.push(*facts);
+        Ok(self.observed)
+    }
+}
+
+fn confirm_pairing(
+    pairing: UnconfirmedSignerPairing,
+    observed: PairingFingerprint,
+) -> Result<PairedSignerRecord, SignerPairingError> {
+    pairing.confirm(&mut TestPairingConfirmation {
+        observed,
+        facts: Vec::new(),
+    })
+}
 
 fn completed_pairing(
     coordinator_key: &SignerTransportKeyPair,
@@ -52,10 +78,26 @@ fn xx_pairing_requires_matching_out_of_band_confirmation() {
 
     let mut wrong = signer.fingerprint().to_bytes();
     wrong[0] ^= 1;
+    let mut confirmation = TestPairingConfirmation {
+        observed: PairingFingerprint::from_bytes(wrong),
+        facts: Vec::new(),
+    };
     assert_eq!(
-        coordinator.confirm(PairingFingerprint::from_bytes(wrong)),
+        coordinator.confirm(&mut confirmation),
         Err(SignerPairingError::ConfirmationFailed)
     );
+    assert_eq!(confirmation.facts.len(), 1);
+    assert_eq!(confirmation.facts[0].role(), SignerPairingRole::Coordinator);
+    assert_eq!(confirmation.facts[0].network_id(), NETWORK);
+    assert_eq!(
+        confirmation.facts[0].local_public_key(),
+        coordinator_key.public_key()
+    );
+    assert_eq!(
+        confirmation.facts[0].remote_public_key(),
+        signer_key.public_key()
+    );
+    assert!(format!("{:?}", confirmation.facts[0]).contains("REDACTED"));
 }
 
 #[test]
@@ -65,8 +107,8 @@ fn confirmed_records_round_trip_and_open_the_paired_kk_channel() {
     let signer_key = SignerTransportKeyPair::generate(&mut rng);
     let (coordinator, signer) = completed_pairing(&coordinator_key, &signer_key);
     let fingerprint = coordinator.fingerprint();
-    let coordinator_record = coordinator.confirm(fingerprint).unwrap();
-    let signer_record = signer.confirm(fingerprint).unwrap();
+    let coordinator_record = confirm_pairing(coordinator, fingerprint).unwrap();
+    let signer_record = confirm_pairing(signer, fingerprint).unwrap();
 
     let coordinator_bytes = coordinator_record.encode();
     let signer_bytes = signer_record.encode();
@@ -187,8 +229,8 @@ fn wrong_network_tampering_and_wrong_local_key_fail_closed() {
 
     let (coordinator, signer) = completed_pairing(&coordinator_key, &signer_key);
     let fingerprint = coordinator.fingerprint();
-    let coordinator_record = coordinator.confirm(fingerprint).unwrap();
-    let _signer_record = signer.confirm(fingerprint).unwrap();
+    let coordinator_record = confirm_pairing(coordinator, fingerprint).unwrap();
+    let _signer_record = confirm_pairing(signer, fingerprint).unwrap();
     let directory = tempdir().unwrap();
     let storage_key = PeerRegistryStorageKey::generate(&mut rng).unwrap();
     let scope = PeerRegistryScope::new(
@@ -221,7 +263,7 @@ fn paired_record_decoder_rejects_noncanonical_or_modified_state() {
     let signer_key = SignerTransportKeyPair::generate(&mut rng);
     let (coordinator, _) = completed_pairing(&coordinator_key, &signer_key);
     let fingerprint = coordinator.fingerprint();
-    let record = coordinator.confirm(fingerprint).unwrap();
+    let record = confirm_pairing(coordinator, fingerprint).unwrap();
     let encoded = record.encode();
 
     assert_eq!(

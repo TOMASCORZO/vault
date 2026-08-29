@@ -1,14 +1,16 @@
 [package]
-name = "vault-zk-accounting-core"
+name = "vault-zk-transfer-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-blake3.workspace = true
 serde.workspace = true
+vault-burn = { path = "../../../crates/vault-burn", features = ["reference-oracle"] }
+vault-privacy = { path = "../../../crates/vault-privacy", features = ["reference-oracle"] }
+vault-protocol = { path = "../../../crates/vault-protocol" }
+zeroize.workspace = true
 
 [lints]
 workspace = true
-

@@ -8,6 +8,7 @@ rust-version.workspace = true
 [features]
 default = []
 circuit = ["orchard/circuit"]
+reference-oracle = []
 
 [dependencies]
 blake3.workspace = true

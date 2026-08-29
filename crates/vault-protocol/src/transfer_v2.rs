@@ -502,13 +502,9 @@ impl TransferV2SignerPolicy {
         })
     }
 
-    /// Validates complete effects and one independently reconstructed output
-    /// token per action before exposing a signable digest.
-    pub fn prepare(
-        &self,
-        effects: &TransferV2Effects,
-        output_authorizations: Vec<VerifiedOutputAuthorization>,
-    ) -> Result<PreparedTransferV2Authorization, ProtocolError> {
+    /// Validates every public domain and resource bound before a trusted signer
+    /// surface displays or approves private output intent.
+    pub fn validate_effects(&self, effects: &TransferV2Effects) -> Result<(), ProtocolError> {
         if effects.chain_id != self.chain_id {
             return Err(ProtocolError::WrongChainId {
                 expected: self.chain_id,
@@ -557,6 +553,17 @@ impl TransferV2SignerPolicy {
                 actual: gas_fee,
             });
         }
+        Ok(())
+    }
+
+    /// Validates complete effects and one independently reconstructed output
+    /// token per action before exposing a signable digest.
+    pub fn prepare(
+        &self,
+        effects: &TransferV2Effects,
+        output_authorizations: Vec<VerifiedOutputAuthorization>,
+    ) -> Result<PreparedTransferV2Authorization, ProtocolError> {
+        self.validate_effects(effects)?;
         if output_authorizations.len() != effects.actions.len() {
             return Err(ProtocolError::OutputAuthorizationCountMismatch {
                 expected: effects.actions.len(),
@@ -630,6 +637,47 @@ impl PreparedTransferV2Authorization {
     #[must_use]
     pub const fn public_inputs_digest(&self) -> PublicInputDigest {
         self.public_inputs
+    }
+
+    /// Exact network/effects-bound RedPallas message for every action.
+    #[must_use]
+    pub const fn authorization_digest(&self) -> SpendAuthorizationDigest {
+        self.authorization_digest
+    }
+
+    /// Number of padded actions requiring authorization.
+    #[must_use]
+    pub fn action_count(&self) -> usize {
+        self.randomized_keys.len()
+    }
+
+    /// Proof-bound randomized validating key for one action.
+    pub fn randomized_validating_key(
+        &self,
+        action_index: usize,
+    ) -> Result<RandomizedSpendValidatingKey, ProtocolError> {
+        self.randomized_keys.get(action_index).copied().ok_or(
+            ProtocolError::InvalidAuthorizationIndex {
+                index: action_index,
+                action_count: self.randomized_keys.len(),
+            },
+        )
+    }
+
+    /// Verifies an externally produced standard authorization for one exact
+    /// prepared action. Threshold aggregation remains outside this boundary.
+    pub fn validate_action_authorization(
+        &self,
+        action_index: usize,
+        authorization: &SpendAuthorization,
+    ) -> Result<(), ProtocolError> {
+        let expected = self.randomized_validating_key(action_index)?;
+        if authorization.validating_key() != expected
+            || !authorization.verify(self.authorization_digest)
+        {
+            return Err(ProtocolError::InvalidSpendAuthorization);
+        }
+        Ok(())
     }
 
     /// Signs one exact action only when its prepared randomized key and output

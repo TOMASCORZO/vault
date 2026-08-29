@@ -205,7 +205,7 @@ impl Circuit {
     /// This is used for circuit shape-dependent operations, such as generating keys
     /// or rendering the circuit layout, where witness values are not required but the
     /// selected circuit version still determines the configured constraints.
-    fn empty(circuit_version: OrchardCircuitVersion) -> Self {
+    pub fn empty(circuit_version: OrchardCircuitVersion) -> Self {
         Circuit {
             path: Value::unknown(),
             pos: Value::unknown(),

@@ -23,6 +23,7 @@ zeroize.workspace = true
 [dev-dependencies]
 incrementalmerkletree.workspace = true
 rand_chacha = "0.3.1"
+vault-signer = { path = "../../../crates/vault-signer", features = ["test-vector-generation"] }
 
 [lints]
 workspace = true

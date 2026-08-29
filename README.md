@@ -116,11 +116,16 @@ independent review, and audits.
     storage, fault injection, private retrieval, growth/side-channel benchmarks,
     and review.
 - An isolated RISC Zero 3.0.6 research backend that:
-  - generated and verified a real accounting proof with development mode disabled;
-  - recomputes the complete consensus public-input transcript inside the guest;
-  - proves checked conservation, exact 0.5% burn, and gas funding over hidden values;
-  - feeds its receipt through the normal fail-closed `ShieldedState` adapter;
-  - records reproducible proof size, cycle count, and CPU latency.
+  - retains the historical real accounting receipt as superseded evidence;
+  - decodes canonical transfer-v2 effects and recomputes their digest inside the guest;
+  - validates depth-32 membership, ownership, nullifiers, randomized authorization,
+    note/value/net openings, exact Ironwood V3 encryption and private output class;
+  - validates conservation, exact ceiling 0.5% burn, gas, the activated DKG
+    descriptor, and the threshold-ElGamal burn opening;
+  - is an isolated conformance oracle with no consensus verifier or state adapter;
+  - is not selected for transfers: a full proving attempt was stopped after
+    about 2 hours 48 minutes without a receipt, while the Halo2 path remains the
+    production candidate.
 - An isolated production-candidate Halo2 backend that:
   - uses Ironwood V3 and the pinned hardened `PostNu6_3` Action circuit;
   - generated a real 7,264-byte two-action proof for membership, ownership,
@@ -147,8 +152,9 @@ independent review, and audits.
   - rejects prover preparation when the encrypted output differs from the one
     constructed with the private note;
   - generated and verified a real 9,600-byte proof of the resulting shape;
-  - remains fail-closed and non-activatable until signer transport/UX profiles,
-    all-bucket vectors, benchmarks, and independent reviews are complete.
+  - publishes fixed real-proof positive and mutation vectors for every
+    2/4/8/16-Action bucket, while remaining fail-closed and non-activatable
+    until signer/UX hardening, benchmarks, and independent reviews complete.
 
 The transparent reference model validates accounting rules before those rules
 are moved into zero-knowledge circuits. Its numeric note identifiers and clear
@@ -165,13 +171,16 @@ cargo run -p vault-sim -- 1000
 ```
 
 The experimental zkVM workspace has an independent Rust 1.90 MSRV and requires
-the pinned RISC Zero guest Rust 1.97.0. Its slower quality and real-proof
-commands are:
+the pinned RISC Zero guest Rust 1.97.0. Its isolated quality command is:
 
 ```bash
 ./scripts/check-zk-risc0.sh
-./scripts/prove-zk-risc0.sh
 ```
+
+`./scripts/prove-zk-risc0.sh` is retained only to reproduce the non-selected
+research backend. It is not a routine gate or transfer path; the full
+transfer-v2 attempt was stopped after about 2 hours 48 minutes without a
+receipt.
 
 The optional simulator argument is a whole-number VLT transfer. The example
 starts with a 1,000,000 VLT genesis note and transfers 1,000 VLT.
@@ -180,7 +189,7 @@ starts with a 1,000,000 VLT genesis note and transfers 1,000 VLT.
 
 ```text
 crates/vault-core   Economic state-machine reference
-crates/vault-burn  Threshold homomorphic burn encryption and decryption shares
+crates/vault-burn  Threshold burn encryption, privacy-gated aggregation, recovery
 crates/vault-privacy  Production-intent Orchard keys and encrypted notes
 crates/vault-protocol  H1 shielded transaction and verifier boundary
 crates/vault-signer  Paired Noise transport and channel-bound signing sessions
@@ -188,7 +197,7 @@ crates/vault-wallet  Finalized scanning and encrypted transactional witness stor
 crates/vault-sim   Small executable scenario
 docs/               Protocol, risks, and roadmap
 zk/halo2/          Isolated specialized Action and accounting/burn backend
-zk/risc0/           Isolated real-proof accounting research backend
+zk/risc0/           Isolated transfer-v2 conformance-oracle backend
 ```
 
 ## Immediate next milestone
@@ -226,10 +235,11 @@ crash/power-loss fault injection, restore drills, and
 access-pattern/timing measurements. Independent signer review,
 keychain-backed trusted pairing/payment/revocation UX, active-session shutdown,
 secure-element rollback protection, hardware/multisignature/delegated-prover
-adapters, and fixed vectors plus performance coverage remain mandatory.
-No suite ID or consensus verifier is issued until those gates, benchmarks, and
-independent reviews are complete. Threshold DKG lifecycle, bounded aggregate
-recovery, network privacy, complete wallet recovery, and durable-state operations
+adapters and performance coverage remain mandatory. Vector-locked conformance
+suite IDs now exist, but no consensus verifier admits them until those gates,
+benchmarks, and independent reviews are complete. Threshold DKG lifecycle,
+full-bound aggregate-recovery performance, H2 publication/finality, network
+privacy, complete wallet recovery, and durable-state operations
 also remain required. See [`OUTPUT_AUTHORIZATION_V1.md`](docs/specs/OUTPUT_AUTHORIZATION_V1.md).
 Signer transport details: [`SIGNER_TRANSPORT_V1.md`](docs/specs/SIGNER_TRANSPORT_V1.md).
 Wallet scanning details: [`COMPACT_BLOCK_V1.md`](docs/specs/COMPACT_BLOCK_V1.md).
@@ -244,8 +254,14 @@ After installing `cargo-audit`, scan the exact lockfile with
 `./scripts/audit.sh`.
 
 Spanish project summary: [`docs/RESUMEN_ES.md`](docs/RESUMEN_ES.md).
-Measured ZK report:
+Current RISC Zero transfer-v2 reference statement:
+[`docs/research/RISC0-TRANSFER-V2-REFERENCE.md`](docs/research/RISC0-TRANSFER-V2-REFERENCE.md).
+Superseded accounting-only measurement:
 [`docs/research/RISC0-ACCOUNTING-V1.md`](docs/research/RISC0-ACCOUNTING-V1.md).
+Selected Halo2 all-bucket conformance artifacts:
+[`docs/research/HALO2-TRANSFER-V2-VECTORS.md`](docs/research/HALO2-TRANSFER-V2-VECTORS.md).
+Frozen H1-C4 burn aggregation policy:
+[`docs/specs/BURN_AGGREGATION_V1.md`](docs/specs/BURN_AGGREGATION_V1.md).
 Known ZK dependency blockers:
 [`docs/audits/zk-risc0-dependency-audit-2026-08-21.md`](docs/audits/zk-risc0-dependency-audit-2026-08-21.md).
 Halo2 dependency audit:

@@ -1,3 +1,3 @@
-//! Compiled Vault accounting guest and its RISC Zero image identifier.
+//! Compiled Vault transfer-v2 reference guest and its image identifier.
 
 include!(concat!(env!("OUT_DIR"), "/methods.rs"));

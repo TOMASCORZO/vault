@@ -9,7 +9,7 @@
 
 mod backup;
 
-pub use backup::WalletBackupSummary;
+pub use backup::{WalletBackupSummary, WalletRestoreDrillSummary};
 
 use core::fmt;
 use std::{
@@ -46,9 +46,11 @@ use zeroize::Zeroizing;
 
 use crate::{
     FinalizedWalletStore, ScannedBlockUpdate, WalletAccountId, WalletBirthdayCheckpoint,
-    WalletRecoveryPlan, WalletRecoveryStatus, WalletRecoveryTarget, WalletScanTip,
+    WalletRecoveryPlan, WalletRecoveryStatus, WalletRecoveryTarget, WalletRollbackAnchor,
+    WalletScanTip,
 };
 
+const LEGACY_SCHEMA_VERSION: u32 = 1;
 const SCHEMA_VERSION: u32 = 2;
 const SHARD_HEIGHT: u8 = 16;
 const MAX_CHECKPOINTS_LIMIT: usize = 4_096;
@@ -58,6 +60,7 @@ const MAX_TREE_CODEC_NODES: usize = 262_143;
 const KEY_CHECK_PLAINTEXT: &[u8] = b"vault-wallet-db-key-check-v1";
 const MASTER_KEY_DOMAIN: &str = "vault.wallet-db-v1.master-key.2026-08-23";
 const INDEX_KEY_DOMAIN: &str = "vault.wallet-db-v1.nullifier-index-key.2026-08-23";
+const ROLLBACK_ANCHOR_DOMAIN: &str = "vault.wallet.rollback-anchor-v1.2026-08-27";
 const NULLIFIER_TAG_DOMAIN: &[u8] = b"vault.wallet-db-v1.nullifier-tag.2026-08-23";
 const RECORD_AAD_DOMAIN: &[u8] = b"vault.wallet-db-v1.record-aad.2026-08-23";
 const NOTE_RECORD_BYTES: usize =
@@ -88,6 +91,10 @@ pub enum WalletDbError {
     AuthenticationFailed,
     /// Schema, canonical encoding, or authenticated state is inconsistent.
     CorruptState,
+    /// The database schema is not accepted by this operation.
+    UnsupportedSchema,
+    /// The legacy database cannot be upgraded without losing recovery state.
+    UnsupportedMigration,
     /// The opened database belongs to another network or wallet identity.
     ScopeMismatch,
     /// The authenticated tip is older than the caller's secure monotonic floor.
@@ -133,6 +140,8 @@ impl fmt::Display for WalletDbError {
             Self::DatabaseFailure => "wallet database engine operation failed",
             Self::AuthenticationFailed => "wallet database authentication failed",
             Self::CorruptState => "wallet database state is corrupt",
+            Self::UnsupportedSchema => "wallet database schema is unsupported",
+            Self::UnsupportedMigration => "wallet database migration is unsupported",
             Self::ScopeMismatch => "wallet database scope does not match the caller",
             Self::RollbackDetected => "wallet database rollback was detected",
             Self::InvalidConfiguration => "wallet database configuration is invalid",
@@ -294,6 +303,7 @@ impl WalletSpendWitness {
 }
 
 struct WalletDbCrypto {
+    schema_version: u32,
     database_id: [u8; 32],
     chain_id: ChainId,
     wallet_id: [u8; 32],
@@ -324,6 +334,26 @@ impl WalletDbCrypto {
         maximum_note_value: u64,
         max_checkpoints: usize,
     ) -> Self {
+        Self::derive_for_schema(
+            root_key,
+            database_id,
+            chain_id,
+            wallet_id,
+            maximum_note_value,
+            max_checkpoints,
+            SCHEMA_VERSION,
+        )
+    }
+
+    fn derive_for_schema(
+        root_key: &[u8; 32],
+        database_id: [u8; 32],
+        chain_id: ChainId,
+        wallet_id: [u8; 32],
+        maximum_note_value: u64,
+        max_checkpoints: usize,
+        schema_version: u32,
+    ) -> Self {
         fn derive_subkey(
             domain: &str,
             root_key: &[u8; 32],
@@ -348,6 +378,7 @@ impl WalletDbCrypto {
         }
 
         Self {
+            schema_version,
             database_id,
             chain_id,
             wallet_id,
@@ -377,7 +408,7 @@ impl WalletDbCrypto {
             RECORD_AAD_DOMAIN.len() + 4 + 32 + 32 + 32 + 1 + 2 + record_key.len(),
         );
         aad.extend_from_slice(RECORD_AAD_DOMAIN);
-        aad.extend_from_slice(&SCHEMA_VERSION.to_be_bytes());
+        aad.extend_from_slice(&self.schema_version.to_be_bytes());
         aad.extend_from_slice(&self.database_id);
         aad.extend_from_slice(self.chain_id.as_bytes());
         aad.extend_from_slice(&self.wallet_id);
@@ -1358,7 +1389,10 @@ fn create_schema(transaction: &Transaction<'_>) -> Result<(), WalletDbError> {
     ))
 }
 
-fn load_metadata(connection: &Connection) -> Result<DatabaseMetadata, WalletDbError> {
+fn load_metadata_for_schema(
+    connection: &Connection,
+    expected_schema_version: u32,
+) -> Result<DatabaseMetadata, WalletDbError> {
     let row = map_database_error(connection.query_row(
         "SELECT schema_version, database_id, chain_id, wallet_id, maximum_note_value,
                 max_checkpoints, key_check
@@ -1381,7 +1415,7 @@ fn load_metadata(connection: &Connection) -> Result<DatabaseMetadata, WalletDbEr
     let wallet_id = row.3.try_into().map_err(|_| WalletDbError::CorruptState)?;
     let maximum_note_value = u64::try_from(row.4).map_err(|_| WalletDbError::CorruptState)?;
     let max_checkpoints = usize::try_from(row.5).map_err(|_| WalletDbError::CorruptState)?;
-    if row.0 != i64::from(SCHEMA_VERSION)
+    if row.0 != i64::from(expected_schema_version)
         || database_id == [0; 32]
         || chain_bytes == [0; 32]
         || wallet_id == [0; 32]
@@ -1403,6 +1437,254 @@ fn load_metadata(connection: &Connection) -> Result<DatabaseMetadata, WalletDbEr
 
 fn record_key_u64(value: u64) -> [u8; 8] {
     value.to_be_bytes()
+}
+
+fn migration_interrupt(stage: u8, fail_after_stage: Option<u8>) -> Result<(), WalletDbError> {
+    if fail_after_stage == Some(stage) {
+        Err(WalletDbError::DatabaseFailure)
+    } else {
+        Ok(())
+    }
+}
+
+fn reseal_singleton_payload(
+    transaction: &Transaction<'_>,
+    legacy_crypto: &WalletDbCrypto,
+    current_crypto: &WalletDbCrypto,
+    select: &str,
+    update: &str,
+    kind: RecordKind,
+    record_key: &[u8],
+) -> Result<(), WalletDbError> {
+    let payload: Vec<u8> = map_database_error(transaction.query_row(select, [], |row| row.get(0)))?;
+    let plaintext = legacy_crypto.open(kind, record_key, &payload)?;
+    let replacement = current_crypto.seal(kind, record_key, &plaintext)?;
+    if map_database_error(transaction.execute(update, params![replacement]))? != 1 {
+        return Err(WalletDbError::CorruptState);
+    }
+    Ok(())
+}
+
+fn reseal_integer_keyed_payloads(
+    transaction: &Transaction<'_>,
+    legacy_crypto: &WalletDbCrypto,
+    current_crypto: &WalletDbCrypto,
+    select_next: &str,
+    update: &str,
+    kind: RecordKind,
+) -> Result<(), WalletDbError> {
+    let mut previous = -1i64;
+    loop {
+        let row = map_database_error(
+            transaction
+                .query_row(select_next, params![previous], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })
+                .optional(),
+        )?;
+        let Some((raw_key, payload)) = row else {
+            return Ok(());
+        };
+        if raw_key <= previous {
+            return Err(WalletDbError::CorruptState);
+        }
+        let key = u64::try_from(raw_key).map_err(|_| WalletDbError::CorruptState)?;
+        let record_key = record_key_u64(key);
+        let plaintext = legacy_crypto.open(kind, &record_key, &payload)?;
+        let replacement = current_crypto.seal(kind, &record_key, &plaintext)?;
+        if map_database_error(transaction.execute(update, params![replacement, raw_key]))? != 1 {
+            return Err(WalletDbError::CorruptState);
+        }
+        previous = raw_key;
+    }
+}
+
+fn reseal_note_payloads(
+    transaction: &Transaction<'_>,
+    legacy_crypto: &WalletDbCrypto,
+    current_crypto: &WalletDbCrypto,
+) -> Result<(), WalletDbError> {
+    let mut previous: Option<Vec<u8>> = None;
+    loop {
+        let row = match previous.as_deref() {
+            None => map_database_error(
+                transaction
+                    .query_row(
+                        "SELECT nullifier_tag, payload FROM wallet_notes
+                         ORDER BY nullifier_tag ASC LIMIT 1",
+                        [],
+                        |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
+                    )
+                    .optional(),
+            )?,
+            Some(previous_tag) => map_database_error(
+                transaction
+                    .query_row(
+                        "SELECT nullifier_tag, payload FROM wallet_notes
+                         WHERE nullifier_tag > ?1 ORDER BY nullifier_tag ASC LIMIT 1",
+                        params![previous_tag],
+                        |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
+                    )
+                    .optional(),
+            )?,
+        };
+        let Some((raw_tag, payload)) = row else {
+            return Ok(());
+        };
+        let tag: [u8; 32] = raw_tag
+            .as_slice()
+            .try_into()
+            .map_err(|_| WalletDbError::CorruptState)?;
+        if previous
+            .as_deref()
+            .is_some_and(|prior| prior >= raw_tag.as_slice())
+        {
+            return Err(WalletDbError::CorruptState);
+        }
+        let plaintext = legacy_crypto.open(RecordKind::Note, &tag, &payload)?;
+        let replacement = current_crypto.seal(RecordKind::Note, &tag, &plaintext)?;
+        if map_database_error(transaction.execute(
+            "UPDATE wallet_notes SET payload = ?1 WHERE nullifier_tag = ?2",
+            params![replacement, &raw_tag],
+        ))? != 1
+        {
+            return Err(WalletDbError::CorruptState);
+        }
+        previous = Some(raw_tag);
+    }
+}
+
+fn migrate_schema_v1_to_v2(
+    transaction: &Transaction<'_>,
+    legacy_crypto: &WalletDbCrypto,
+    current_crypto: &WalletDbCrypto,
+    metadata: &DatabaseMetadata,
+    fail_after_stage: Option<u8>,
+) -> Result<(), WalletDbError> {
+    reseal_singleton_payload(
+        transaction,
+        legacy_crypto,
+        current_crypto,
+        "SELECT payload FROM wallet_tip WHERE singleton = 1",
+        "UPDATE wallet_tip SET payload = ?1 WHERE singleton = 1",
+        RecordKind::Tip,
+        b"tip",
+    )?;
+    migration_interrupt(1, fail_after_stage)?;
+    reseal_singleton_payload(
+        transaction,
+        legacy_crypto,
+        current_crypto,
+        "SELECT payload FROM wallet_origin WHERE singleton = 1",
+        "UPDATE wallet_origin SET payload = ?1 WHERE singleton = 1",
+        RecordKind::Origin,
+        b"origin",
+    )?;
+    migration_interrupt(2, fail_after_stage)?;
+    reseal_note_payloads(transaction, legacy_crypto, current_crypto)?;
+    migration_interrupt(3, fail_after_stage)?;
+    reseal_integer_keyed_payloads(
+        transaction,
+        legacy_crypto,
+        current_crypto,
+        "SELECT shard_index, payload FROM tree_shards
+         WHERE shard_index > ?1 ORDER BY shard_index ASC LIMIT 1",
+        "UPDATE tree_shards SET payload = ?1 WHERE shard_index = ?2",
+        RecordKind::Shard,
+    )?;
+    migration_interrupt(4, fail_after_stage)?;
+    reseal_singleton_payload(
+        transaction,
+        legacy_crypto,
+        current_crypto,
+        "SELECT payload FROM tree_cap WHERE singleton = 1",
+        "UPDATE tree_cap SET payload = ?1 WHERE singleton = 1",
+        RecordKind::Cap,
+        b"cap",
+    )?;
+    migration_interrupt(5, fail_after_stage)?;
+    reseal_integer_keyed_payloads(
+        transaction,
+        legacy_crypto,
+        current_crypto,
+        "SELECT checkpoint_id, payload FROM tree_checkpoints
+         WHERE checkpoint_id > ?1 ORDER BY checkpoint_id ASC LIMIT 1",
+        "UPDATE tree_checkpoints SET payload = ?1 WHERE checkpoint_id = ?2",
+        RecordKind::Checkpoint,
+    )?;
+    migration_interrupt(6, fail_after_stage)?;
+    reseal_integer_keyed_payloads(
+        transaction,
+        legacy_crypto,
+        current_crypto,
+        "SELECT checkpoint_id, payload FROM tree_retained_checkpoints
+         WHERE checkpoint_id > ?1 ORDER BY checkpoint_id ASC LIMIT 1",
+        "UPDATE tree_retained_checkpoints SET payload = ?1 WHERE checkpoint_id = ?2",
+        RecordKind::RetainedCheckpoint,
+    )?;
+    migration_interrupt(7, fail_after_stage)?;
+
+    let key_check = legacy_crypto.open(RecordKind::KeyCheck, b"key-check", &metadata.key_check)?;
+    if key_check.as_slice() != KEY_CHECK_PLAINTEXT {
+        return Err(WalletDbError::AuthenticationFailed);
+    }
+    let replacement_key_check =
+        current_crypto.seal(RecordKind::KeyCheck, b"key-check", KEY_CHECK_PLAINTEXT)?;
+    map_database_error(transaction.execute_batch(
+        "CREATE TABLE wallet_metadata_v2 (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            schema_version INTEGER NOT NULL CHECK (schema_version = 2),
+            database_id BLOB NOT NULL CHECK (length(database_id) = 32),
+            chain_id BLOB NOT NULL CHECK (length(chain_id) = 32),
+            wallet_id BLOB NOT NULL CHECK (length(wallet_id) = 32),
+            maximum_note_value INTEGER NOT NULL CHECK (maximum_note_value > 0),
+            max_checkpoints INTEGER NOT NULL CHECK (max_checkpoints > 0 AND max_checkpoints <= 4096),
+            key_check BLOB NOT NULL
+        ) STRICT;",
+    ))?;
+    if map_database_error(transaction.execute(
+        "INSERT INTO wallet_metadata_v2(
+            singleton, schema_version, database_id, chain_id, wallet_id,
+            maximum_note_value, max_checkpoints, key_check
+         ) VALUES (1, 2, ?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            metadata.database_id.to_vec(),
+            metadata.chain_id.as_bytes().to_vec(),
+            metadata.wallet_id.to_vec(),
+            i64::try_from(metadata.maximum_note_value).map_err(|_| WalletDbError::CorruptState)?,
+            i64::try_from(metadata.max_checkpoints).map_err(|_| WalletDbError::CorruptState)?,
+            replacement_key_check,
+        ],
+    ))? != 1
+    {
+        return Err(WalletDbError::CorruptState);
+    }
+    map_database_error(transaction.execute_batch(
+        "DROP TABLE wallet_metadata;
+         ALTER TABLE wallet_metadata_v2 RENAME TO wallet_metadata;",
+    ))?;
+    migration_interrupt(8, fail_after_stage)?;
+
+    let recovery_payload = current_crypto.seal(
+        RecordKind::Recovery,
+        b"recovery",
+        &encode_recovery_state(&WalletRecoveryState::NotRequired)?,
+    )?;
+    map_database_error(transaction.execute_batch(
+        "CREATE TABLE wallet_recovery (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            payload BLOB NOT NULL
+        ) STRICT;",
+    ))?;
+    if map_database_error(transaction.execute(
+        "INSERT INTO wallet_recovery(singleton, payload) VALUES (1, ?1)",
+        params![recovery_payload],
+    ))? != 1
+    {
+        return Err(WalletDbError::CorruptState);
+    }
+    map_database_error(transaction.pragma_update(None, "user_version", SCHEMA_VERSION))?;
+    migration_interrupt(9, fail_after_stage)
 }
 
 struct SqliteShardStore<'a> {
@@ -1814,6 +2096,54 @@ impl SqliteShardStore<'_> {
     }
 }
 
+/// Redacted storage measurements from one validated database compaction.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WalletCompactionSummary {
+    before_bytes: u64,
+    after_bytes: u64,
+    before_pages: u64,
+    after_pages: u64,
+    reclaimed_pages: u64,
+}
+
+impl fmt::Debug for WalletCompactionSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("WalletCompactionSummary(REDACTED)")
+    }
+}
+
+impl WalletCompactionSummary {
+    /// Database file length before compaction.
+    #[must_use]
+    pub const fn before_bytes(self) -> u64 {
+        self.before_bytes
+    }
+
+    /// Database file length after compaction and validation.
+    #[must_use]
+    pub const fn after_bytes(self) -> u64 {
+        self.after_bytes
+    }
+
+    /// SQLite page count before compaction.
+    #[must_use]
+    pub const fn before_pages(self) -> u64 {
+        self.before_pages
+    }
+
+    /// SQLite page count after compaction.
+    #[must_use]
+    pub const fn after_pages(self) -> u64 {
+        self.after_pages
+    }
+
+    /// Free-list pages removed by the successful compaction.
+    #[must_use]
+    pub const fn reclaimed_pages(self) -> u64 {
+        self.reclaimed_pages
+    }
+}
+
 /// Encrypted, single-writer, transactional finalized wallet database.
 ///
 /// The database file is not a generic SQLite privacy boundary: schema shape,
@@ -1821,6 +2151,7 @@ impl SqliteShardStore<'_> {
 /// wallet-specific value and note-to-nullifier index is nevertheless keyed and
 /// authenticated. A handle is permanently poisoned after uncertain durability.
 pub struct EncryptedWalletDb {
+    path: PathBuf,
     connection: Connection,
     _lock: File,
     crypto: WalletDbCrypto,
@@ -2020,6 +2351,7 @@ impl EncryptedWalletDb {
         sync_parent(&parent)?;
 
         let database = Self {
+            path: path.to_path_buf(),
             connection,
             _lock: lock,
             crypto,
@@ -2052,6 +2384,122 @@ impl EncryptedWalletDb {
         )
     }
 
+    /// Migrates an authenticated schema-1 genesis wallet to schema 2.
+    ///
+    /// A complete authenticated legacy backup is published before the
+    /// in-place transaction begins. Schema-1 birthday wallets cannot be
+    /// upgraded because they predate durable account-set and completeness
+    /// state; they must be recovered into a new destination instead.
+    pub fn migrate_legacy_v1(
+        path: &Path,
+        migration_backup_path: &Path,
+        root_key: &[u8; 32],
+        expected_chain_id: ChainId,
+        expected_wallet_id: [u8; 32],
+        minimum_finalized_height: u64,
+    ) -> Result<Self, WalletDbError> {
+        if path == migration_backup_path {
+            return Err(WalletDbError::InvalidPath);
+        }
+        protected_parent(path)?;
+        verify_database_file(path)?;
+        let lock = open_lock(path)?;
+        let legacy = Self::open_legacy_locked(
+            path,
+            root_key,
+            expected_chain_id,
+            expected_wallet_id,
+            minimum_finalized_height,
+            lock,
+        )?;
+        if legacy.load_origin_record(&legacy.connection)?.kind != WalletOriginKind::Genesis {
+            return Err(WalletDbError::UnsupportedMigration);
+        }
+        legacy.export_backup(migration_backup_path, root_key)?;
+        legacy.migrate_legacy_in_place(path, root_key, None)
+    }
+
+    fn open_restored_with_legacy_migration(
+        path: &Path,
+        root_key: &[u8; 32],
+        expected_chain_id: ChainId,
+        expected_wallet_id: [u8; 32],
+        minimum_finalized_height: u64,
+    ) -> Result<Self, WalletDbError> {
+        match Self::open(
+            path,
+            root_key,
+            expected_chain_id,
+            expected_wallet_id,
+            minimum_finalized_height,
+        ) {
+            Ok(database) => Ok(database),
+            Err(WalletDbError::UnsupportedSchema) => {
+                let lock = open_lock(path)?;
+                let legacy = Self::open_legacy_locked(
+                    path,
+                    root_key,
+                    expected_chain_id,
+                    expected_wallet_id,
+                    minimum_finalized_height,
+                    lock,
+                )?;
+                if legacy.load_origin_record(&legacy.connection)?.kind != WalletOriginKind::Genesis
+                {
+                    return Err(WalletDbError::UnsupportedMigration);
+                }
+                legacy.migrate_legacy_in_place(path, root_key, None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn migrate_legacy_in_place(
+        mut self,
+        path: &Path,
+        root_key: &[u8; 32],
+        fail_after_stage: Option<u8>,
+    ) -> Result<Self, WalletDbError> {
+        if self.crypto.schema_version != LEGACY_SCHEMA_VERSION {
+            return Err(WalletDbError::UnsupportedSchema);
+        }
+        let metadata = load_metadata_for_schema(&self.connection, LEGACY_SCHEMA_VERSION)?;
+        let current_crypto = WalletDbCrypto::derive(
+            root_key,
+            metadata.database_id,
+            metadata.chain_id,
+            metadata.wallet_id,
+            metadata.maximum_note_value,
+            metadata.max_checkpoints,
+        );
+        let transaction = map_database_error(
+            self.connection
+                .transaction_with_behavior(TransactionBehavior::Exclusive),
+        )?;
+        let migrated = migrate_schema_v1_to_v2(
+            &transaction,
+            &self.crypto,
+            &current_crypto,
+            &metadata,
+            fail_after_stage,
+        );
+        match migrated {
+            Ok(()) => map_database_error(transaction.commit())?,
+            Err(error) => {
+                if transaction.rollback().is_err() {
+                    return Err(WalletDbError::Poisoned);
+                }
+                return Err(error);
+            }
+        }
+        File::open(path)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        self.crypto = current_crypto;
+        self.validate_open_state()?;
+        Ok(self)
+    }
+
     fn open_locked(
         path: &Path,
         root_key: &[u8; 32],
@@ -2059,6 +2507,45 @@ impl EncryptedWalletDb {
         expected_wallet_id: [u8; 32],
         minimum_finalized_height: u64,
         lock: File,
+    ) -> Result<Self, WalletDbError> {
+        Self::open_locked_at_schema(
+            path,
+            root_key,
+            expected_chain_id,
+            expected_wallet_id,
+            minimum_finalized_height,
+            lock,
+            SCHEMA_VERSION,
+        )
+    }
+
+    fn open_legacy_locked(
+        path: &Path,
+        root_key: &[u8; 32],
+        expected_chain_id: ChainId,
+        expected_wallet_id: [u8; 32],
+        minimum_finalized_height: u64,
+        lock: File,
+    ) -> Result<Self, WalletDbError> {
+        Self::open_locked_at_schema(
+            path,
+            root_key,
+            expected_chain_id,
+            expected_wallet_id,
+            minimum_finalized_height,
+            lock,
+            LEGACY_SCHEMA_VERSION,
+        )
+    }
+
+    fn open_locked_at_schema(
+        path: &Path,
+        root_key: &[u8; 32],
+        expected_chain_id: ChainId,
+        expected_wallet_id: [u8; 32],
+        minimum_finalized_height: u64,
+        lock: File,
+        schema_version: u32,
     ) -> Result<Self, WalletDbError> {
         let connection = open_sqlite(path)?;
         configure_connection(&connection)?;
@@ -2071,26 +2558,28 @@ impl EncryptedWalletDb {
         }
         let user_version: i64 =
             map_database_error(connection.query_row("PRAGMA user_version", [], |row| row.get(0)))?;
-        if user_version != i64::from(SCHEMA_VERSION) {
-            return Err(WalletDbError::CorruptState);
+        if user_version != i64::from(schema_version) {
+            return Err(WalletDbError::UnsupportedSchema);
         }
-        let metadata = load_metadata(&connection)?;
+        let metadata = load_metadata_for_schema(&connection, schema_version)?;
         if metadata.chain_id != expected_chain_id || metadata.wallet_id != expected_wallet_id {
             return Err(WalletDbError::ScopeMismatch);
         }
-        let crypto = WalletDbCrypto::derive(
+        let crypto = WalletDbCrypto::derive_for_schema(
             root_key,
             metadata.database_id,
             metadata.chain_id,
             metadata.wallet_id,
             metadata.maximum_note_value,
             metadata.max_checkpoints,
+            schema_version,
         );
         let key_check = crypto.open(RecordKind::KeyCheck, b"key-check", &metadata.key_check)?;
         if key_check.as_slice() != KEY_CHECK_PLAINTEXT {
             return Err(WalletDbError::AuthenticationFailed);
         }
         let database = Self {
+            path: path.to_path_buf(),
             connection,
             _lock: lock,
             crypto,
@@ -2112,6 +2601,102 @@ impl EncryptedWalletDb {
     #[must_use]
     pub const fn config(&self) -> WalletDatabaseConfig {
         self.config
+    }
+
+    /// Commits the exact database identity, scope, and authenticated finalized
+    /// tip for a rollback-resistant platform state slot.
+    pub fn rollback_anchor(&self) -> Result<WalletRollbackAnchor, WalletDbError> {
+        if self.poisoned {
+            return Err(WalletDbError::Poisoned);
+        }
+        let tip = self.load_tip_record(&self.connection)?;
+        self.rollback_anchor_for_tip(&tip)
+    }
+
+    pub(crate) fn rollback_anchor_for_tip(
+        &self,
+        tip: &WalletScanTip,
+    ) -> Result<WalletRollbackAnchor, WalletDbError> {
+        if tip.chain_id() != self.crypto.chain_id {
+            return Err(WalletDbError::ScopeMismatch);
+        }
+        let mut hasher = Hasher::new_derive_key(ROLLBACK_ANCHOR_DOMAIN);
+        hasher.update(&self.crypto.database_id);
+        hasher.update(self.crypto.chain_id.as_bytes());
+        hasher.update(&self.crypto.wallet_id);
+        hasher.update(&tip.height().to_be_bytes());
+        hasher.update(&tip.block_hash());
+        hasher.update(&tip.tree_size().to_be_bytes());
+        hasher.update(&tip.tree_root().to_bytes());
+        WalletRollbackAnchor::new(tip.height(), *hasher.finalize().as_bytes())
+    }
+
+    /// Rewrites the database with SQLite `VACUUM`, then revalidates all private
+    /// state before returning storage measurements.
+    ///
+    /// Compaction can require temporary disk space comparable to the database.
+    /// Callers must create and drill a current backup first. Any failure is
+    /// reported; if the post-failure database cannot be fully validated, the
+    /// handle is permanently poisoned.
+    pub fn compact(&mut self) -> Result<WalletCompactionSummary, WalletDbError> {
+        if self.poisoned {
+            return Err(WalletDbError::Poisoned);
+        }
+        self.validate_open_state()?;
+        let before_bytes = fs::metadata(&self.path)
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .len();
+        let before_pages = u64::try_from(map_database_error(self.connection.query_row(
+            "PRAGMA page_count",
+            [],
+            |row| row.get::<_, i64>(0),
+        ))?)
+        .map_err(|_| WalletDbError::DatabaseFailure)?;
+        let before_free_pages = u64::try_from(map_database_error(self.connection.query_row(
+            "PRAGMA freelist_count",
+            [],
+            |row| row.get::<_, i64>(0),
+        ))?)
+        .map_err(|_| WalletDbError::DatabaseFailure)?;
+
+        if map_database_error(self.connection.execute_batch("VACUUM")).is_err() {
+            if self.validate_open_state().is_err() {
+                self.poisoned = true;
+                return Err(WalletDbError::Poisoned);
+            }
+            return Err(WalletDbError::DatabaseFailure);
+        }
+        File::open(&self.path)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        self.validate_open_state()?;
+
+        let after_bytes = fs::metadata(&self.path)
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .len();
+        let after_pages = u64::try_from(map_database_error(self.connection.query_row(
+            "PRAGMA page_count",
+            [],
+            |row| row.get::<_, i64>(0),
+        ))?)
+        .map_err(|_| WalletDbError::DatabaseFailure)?;
+        let after_free_pages = u64::try_from(map_database_error(self.connection.query_row(
+            "PRAGMA freelist_count",
+            [],
+            |row| row.get::<_, i64>(0),
+        ))?)
+        .map_err(|_| WalletDbError::DatabaseFailure)?;
+        if after_free_pages != 0 {
+            self.poisoned = true;
+            return Err(WalletDbError::Poisoned);
+        }
+        Ok(WalletCompactionSummary {
+            before_bytes,
+            after_bytes,
+            before_pages,
+            after_pages,
+            reclaimed_pages: before_free_pages,
+        })
     }
 
     /// Authenticated birthday frontier retained for deterministic seed rescans.
@@ -2349,47 +2934,66 @@ impl EncryptedWalletDb {
         {
             return Err(WalletDbError::CorruptState);
         }
-        let recovery = self.load_recovery_record(&self.connection)?;
-        match (origin.kind, &recovery) {
-            (WalletOriginKind::Genesis, WalletRecoveryState::NotRequired) => {}
-            (WalletOriginKind::Birthday, WalletRecoveryState::Seed(progress)) => {
-                if progress.state_height != tip.height()
-                    || progress.state_block_hash != tip.block_hash()
-                    || progress.target.height <= origin.tip.height()
-                    || progress.target.tree_size < origin.tip.tree_size()
-                {
+        match self.crypto.schema_version {
+            LEGACY_SCHEMA_VERSION => {
+                let recovery_tables: i64 = map_database_error(self.connection.query_row(
+                    "SELECT count(*) FROM sqlite_schema
+                     WHERE type = 'table' AND name = 'wallet_recovery'",
+                    [],
+                    |row| row.get(0),
+                ))?;
+                if recovery_tables != 0 {
                     return Err(WalletDbError::CorruptState);
                 }
-                match progress.phase {
-                    WalletRecoveryPhase::InProgress if tip.height() < progress.target.height => {}
-                    WalletRecoveryPhase::Complete if tip.height() >= progress.target.height => {
-                        if !recovery_gap_satisfied(progress)
-                            || (tip.height() == progress.target.height
-                                && !tip_matches_recovery_target(&tip, progress.target))
+            }
+            SCHEMA_VERSION => {
+                let recovery = self.load_recovery_record(&self.connection)?;
+                match (origin.kind, &recovery) {
+                    (WalletOriginKind::Genesis, WalletRecoveryState::NotRequired) => {}
+                    (WalletOriginKind::Birthday, WalletRecoveryState::Seed(progress)) => {
+                        if progress.state_height != tip.height()
+                            || progress.state_block_hash != tip.block_hash()
+                            || progress.target.height <= origin.tip.height()
+                            || progress.target.tree_size < origin.tip.tree_size()
                         {
                             return Err(WalletDbError::CorruptState);
                         }
-                    }
-                    WalletRecoveryPhase::AccountRangeExhausted
-                        if tip_matches_recovery_target(&tip, progress.target) =>
-                    {
-                        if recovery_gap_satisfied(progress)
-                            || highest_used_account(progress).is_none()
-                        {
-                            return Err(WalletDbError::CorruptState);
+                        match progress.phase {
+                            WalletRecoveryPhase::InProgress
+                                if tip.height() < progress.target.height => {}
+                            WalletRecoveryPhase::Complete
+                                if tip.height() >= progress.target.height =>
+                            {
+                                if !recovery_gap_satisfied(progress)
+                                    || (tip.height() == progress.target.height
+                                        && !tip_matches_recovery_target(&tip, progress.target))
+                                {
+                                    return Err(WalletDbError::CorruptState);
+                                }
+                            }
+                            WalletRecoveryPhase::AccountRangeExhausted
+                                if tip_matches_recovery_target(&tip, progress.target) =>
+                            {
+                                if recovery_gap_satisfied(progress)
+                                    || highest_used_account(progress).is_none()
+                                {
+                                    return Err(WalletDbError::CorruptState);
+                                }
+                            }
+                            WalletRecoveryPhase::InProgress
+                            | WalletRecoveryPhase::Complete
+                            | WalletRecoveryPhase::AccountRangeExhausted => {
+                                return Err(WalletDbError::CorruptState);
+                            }
                         }
                     }
-                    WalletRecoveryPhase::InProgress
-                    | WalletRecoveryPhase::Complete
-                    | WalletRecoveryPhase::AccountRangeExhausted => {
+                    (WalletOriginKind::Genesis, WalletRecoveryState::Seed(_))
+                    | (WalletOriginKind::Birthday, WalletRecoveryState::NotRequired) => {
                         return Err(WalletDbError::CorruptState);
                     }
                 }
             }
-            (WalletOriginKind::Genesis, WalletRecoveryState::Seed(_))
-            | (WalletOriginKind::Birthday, WalletRecoveryState::NotRequired) => {
-                return Err(WalletDbError::CorruptState);
-            }
+            _ => return Err(WalletDbError::UnsupportedSchema),
         }
         let store = SqliteShardStore::new(&self.connection, &self.crypto);
         let tree = WalletShardTree::new(store, self.config.max_checkpoints);
@@ -2706,6 +3310,348 @@ impl FinalizedWalletStore for EncryptedWalletDb {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+    use vault_privacy::{MEMO_BYTES, NoteCommitmentTree, PreparedNoteOutput, VaultSpendingKey};
+    use vault_protocol::{
+        CompactBlock, CompactBlockAction, CompactBlockTransaction, FinalizedCompactBlockHeader,
+        TransactionId,
+    };
+
+    use crate::{WalletScanAccount, scan_finalized_block};
+
+    const TEST_CHAIN: [u8; 32] = [0x31; 32];
+    const TEST_WALLET: [u8; 32] = [0x32; 32];
+    const TEST_ROOT_KEY: [u8; 32] = [0x33; 32];
+
+    fn test_tip() -> WalletScanTip {
+        WalletScanTip::from_verified_checkpoint(
+            ChainId::new(TEST_CHAIN),
+            0,
+            [0x34; 32],
+            &NoteTreeSnapshot::from_parts(0, None, vec![]),
+        )
+        .unwrap()
+    }
+
+    fn test_config() -> WalletDatabaseConfig {
+        WalletDatabaseConfig::new(TEST_WALLET, 21_000_000 * 1_000_000_000, 100).unwrap()
+    }
+
+    fn test_path(directory: &Path, name: &str) -> PathBuf {
+        fs::canonicalize(directory).unwrap().join(name)
+    }
+
+    fn convert_current_fixture_to_legacy(path: &Path) {
+        let mut connection = open_sqlite(path).unwrap();
+        configure_connection(&connection).unwrap();
+        let metadata = load_metadata_for_schema(&connection, SCHEMA_VERSION).unwrap();
+        let current_crypto = WalletDbCrypto::derive(
+            &TEST_ROOT_KEY,
+            metadata.database_id,
+            metadata.chain_id,
+            metadata.wallet_id,
+            metadata.maximum_note_value,
+            metadata.max_checkpoints,
+        );
+        let legacy_crypto = WalletDbCrypto::derive_for_schema(
+            &TEST_ROOT_KEY,
+            metadata.database_id,
+            metadata.chain_id,
+            metadata.wallet_id,
+            metadata.maximum_note_value,
+            metadata.max_checkpoints,
+            LEGACY_SCHEMA_VERSION,
+        );
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Exclusive)
+            .unwrap();
+        reseal_singleton_payload(
+            &transaction,
+            &current_crypto,
+            &legacy_crypto,
+            "SELECT payload FROM wallet_tip WHERE singleton = 1",
+            "UPDATE wallet_tip SET payload = ?1 WHERE singleton = 1",
+            RecordKind::Tip,
+            b"tip",
+        )
+        .unwrap();
+        reseal_singleton_payload(
+            &transaction,
+            &current_crypto,
+            &legacy_crypto,
+            "SELECT payload FROM wallet_origin WHERE singleton = 1",
+            "UPDATE wallet_origin SET payload = ?1 WHERE singleton = 1",
+            RecordKind::Origin,
+            b"origin",
+        )
+        .unwrap();
+        reseal_note_payloads(&transaction, &current_crypto, &legacy_crypto).unwrap();
+        reseal_integer_keyed_payloads(
+            &transaction,
+            &current_crypto,
+            &legacy_crypto,
+            "SELECT shard_index, payload FROM tree_shards
+             WHERE shard_index > ?1 ORDER BY shard_index ASC LIMIT 1",
+            "UPDATE tree_shards SET payload = ?1 WHERE shard_index = ?2",
+            RecordKind::Shard,
+        )
+        .unwrap();
+        reseal_singleton_payload(
+            &transaction,
+            &current_crypto,
+            &legacy_crypto,
+            "SELECT payload FROM tree_cap WHERE singleton = 1",
+            "UPDATE tree_cap SET payload = ?1 WHERE singleton = 1",
+            RecordKind::Cap,
+            b"cap",
+        )
+        .unwrap();
+        reseal_integer_keyed_payloads(
+            &transaction,
+            &current_crypto,
+            &legacy_crypto,
+            "SELECT checkpoint_id, payload FROM tree_checkpoints
+             WHERE checkpoint_id > ?1 ORDER BY checkpoint_id ASC LIMIT 1",
+            "UPDATE tree_checkpoints SET payload = ?1 WHERE checkpoint_id = ?2",
+            RecordKind::Checkpoint,
+        )
+        .unwrap();
+        reseal_integer_keyed_payloads(
+            &transaction,
+            &current_crypto,
+            &legacy_crypto,
+            "SELECT checkpoint_id, payload FROM tree_retained_checkpoints
+             WHERE checkpoint_id > ?1 ORDER BY checkpoint_id ASC LIMIT 1",
+            "UPDATE tree_retained_checkpoints SET payload = ?1 WHERE checkpoint_id = ?2",
+            RecordKind::RetainedCheckpoint,
+        )
+        .unwrap();
+        let key_check = current_crypto
+            .open(RecordKind::KeyCheck, b"key-check", &metadata.key_check)
+            .unwrap();
+        assert_eq!(key_check.as_slice(), KEY_CHECK_PLAINTEXT);
+        let legacy_key_check = legacy_crypto
+            .seal(RecordKind::KeyCheck, b"key-check", KEY_CHECK_PLAINTEXT)
+            .unwrap();
+        transaction
+            .execute_batch(
+                "CREATE TABLE wallet_metadata_v1 (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+                    database_id BLOB NOT NULL CHECK (length(database_id) = 32),
+                    chain_id BLOB NOT NULL CHECK (length(chain_id) = 32),
+                    wallet_id BLOB NOT NULL CHECK (length(wallet_id) = 32),
+                    maximum_note_value INTEGER NOT NULL CHECK (maximum_note_value > 0),
+                    max_checkpoints INTEGER NOT NULL CHECK (max_checkpoints > 0 AND max_checkpoints <= 4096),
+                    key_check BLOB NOT NULL
+                ) STRICT;",
+            )
+            .unwrap();
+        assert_eq!(
+            transaction
+                .execute(
+                    "INSERT INTO wallet_metadata_v1(
+                        singleton, schema_version, database_id, chain_id, wallet_id,
+                        maximum_note_value, max_checkpoints, key_check
+                     ) VALUES (1, 1, ?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        metadata.database_id.to_vec(),
+                        metadata.chain_id.as_bytes().to_vec(),
+                        metadata.wallet_id.to_vec(),
+                        i64::try_from(metadata.maximum_note_value).unwrap(),
+                        i64::try_from(metadata.max_checkpoints).unwrap(),
+                        legacy_key_check,
+                    ],
+                )
+                .unwrap(),
+            1
+        );
+        transaction
+            .execute_batch(
+                "DROP TABLE wallet_recovery;
+                 DROP TABLE wallet_metadata;
+                 ALTER TABLE wallet_metadata_v1 RENAME TO wallet_metadata;
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    fn commit_test_note(database: &mut EncryptedWalletDb) -> ActionNullifier {
+        let tip = database.load_tip().unwrap();
+        let owner = VaultSpendingKey::derive(&[0x35; 32], TEST_CHAIN, 0)
+            .unwrap()
+            .full_viewing_key();
+        let action_nullifier = ActionNullifier::from_bytes([0x36; 32]).unwrap();
+        let mut rng = ChaCha20Rng::from_seed([0x37; 32]);
+        let prepared = PreparedNoteOutput::create(
+            &owner,
+            KeyScope::External,
+            owner.address_at(0, KeyScope::External),
+            123_456,
+            test_config().maximum_note_value(),
+            action_nullifier,
+            [0x38; MEMO_BYTES],
+            &mut rng,
+        )
+        .unwrap();
+        let second_nullifier = ActionNullifier::from_bytes([0x3C; 32]).unwrap();
+        let second = PreparedNoteOutput::create(
+            &owner,
+            KeyScope::Internal,
+            owner.address_at(1, KeyScope::Internal),
+            654_321,
+            test_config().maximum_note_value(),
+            second_nullifier,
+            [0x3D; MEMO_BYTES],
+            &mut rng,
+        )
+        .unwrap();
+        let mut post_tree = NoteCommitmentTree::restore(&tip.tree_snapshot()).unwrap();
+        post_tree
+            .append(prepared.encrypted_note().note_commitment())
+            .unwrap();
+        post_tree
+            .append(second.encrypted_note().note_commitment())
+            .unwrap();
+        let transaction = CompactBlockTransaction::new(
+            TransactionId::new([0x39; 32]),
+            vec![
+                CompactBlockAction::new(action_nullifier, prepared.encrypted_note().clone()),
+                CompactBlockAction::new(second_nullifier, second.encrypted_note().clone()),
+            ],
+        )
+        .unwrap();
+        let block = CompactBlock::new(
+            tip.chain_id(),
+            1,
+            [0x3A; 32],
+            tip.block_hash(),
+            tip.tree_size(),
+            tip.tree_root(),
+            post_tree.size(),
+            post_tree.typed_root(),
+            vec![transaction],
+        )
+        .unwrap();
+        let header = FinalizedCompactBlockHeader::from_verified_consensus(
+            block.chain_id(),
+            block.height(),
+            block.block_hash(),
+            block.parent_hash(),
+            block.pre_tree_size(),
+            block.pre_tree_root(),
+            block.post_tree_size(),
+            block.post_tree_root(),
+            block.commitment(),
+        )
+        .unwrap();
+        let authenticated = block.authenticate(header).unwrap();
+        let account =
+            WalletScanAccount::new(WalletAccountId::from_bytes([0x3B; 32]).unwrap(), &owner);
+        let update = scan_finalized_block(&tip, &authenticated, &[account]).unwrap();
+        let spend_nullifier = update.detected_notes()[0].spend_nullifier();
+        database.commit_finalized_block(update).unwrap();
+        spend_nullifier
+    }
+
+    fn acceptance_bytes(context: &str, ordinal: u64) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new_derive_key(context);
+        hasher.update(&ordinal.to_be_bytes());
+        *hasher.finalize().as_bytes()
+    }
+
+    fn acceptance_nullifier(ordinal: u64) -> ActionNullifier {
+        for counter in 0..=u8::MAX {
+            let mut hasher = blake3::Hasher::new_derive_key("vault.h1-a2.migration.nullifier.v1");
+            hasher.update(&ordinal.to_be_bytes());
+            hasher.update(&[counter]);
+            if let Ok(nullifier) = ActionNullifier::from_bytes(*hasher.finalize().as_bytes()) {
+                return nullifier;
+            }
+        }
+        panic!("bounded migration fixture nullifier sampling exhausted")
+    }
+
+    fn commit_acceptance_history_block(
+        database: &mut EncryptedWalletDb,
+        owner: &vault_privacy::VaultFullViewingKey,
+        height: u64,
+        actions_per_block: usize,
+    ) {
+        let tip = database.load_tip().unwrap();
+        assert_eq!(tip.height().checked_add(1), Some(height));
+        let mut rng = ChaCha20Rng::from_seed(acceptance_bytes(
+            "vault.h1-a2.migration.block-rng.v1",
+            height,
+        ));
+        let mut actions = Vec::with_capacity(actions_per_block);
+        for action_index in 0..actions_per_block {
+            let ordinal = height
+                .checked_mul(16)
+                .and_then(|value| value.checked_add(action_index as u64))
+                .unwrap();
+            let nullifier = acceptance_nullifier(ordinal);
+            let output = PreparedNoteOutput::create(
+                owner,
+                KeyScope::External,
+                owner.address_at(u32::try_from(ordinal).unwrap(), KeyScope::External),
+                ordinal.checked_add(1).unwrap(),
+                test_config().maximum_note_value(),
+                nullifier,
+                [u8::try_from(action_index).unwrap(); MEMO_BYTES],
+                &mut rng,
+            )
+            .unwrap();
+            actions.push(CompactBlockAction::new(
+                nullifier,
+                output.encrypted_note().clone(),
+            ));
+        }
+        actions.sort_by_key(CompactBlockAction::nullifier);
+        let mut post_tree = NoteCommitmentTree::restore(&tip.tree_snapshot()).unwrap();
+        for action in &actions {
+            post_tree.append(action.output().note_commitment()).unwrap();
+        }
+        let transaction = CompactBlockTransaction::new(
+            TransactionId::new(acceptance_bytes(
+                "vault.h1-a2.migration.transaction.v1",
+                height,
+            )),
+            actions,
+        )
+        .unwrap();
+        let block = CompactBlock::new(
+            tip.chain_id(),
+            height,
+            acceptance_bytes("vault.h1-a2.migration.block.v1", height),
+            tip.block_hash(),
+            tip.tree_size(),
+            tip.tree_root(),
+            post_tree.size(),
+            post_tree.typed_root(),
+            vec![transaction],
+        )
+        .unwrap();
+        let header = FinalizedCompactBlockHeader::from_verified_consensus(
+            block.chain_id(),
+            block.height(),
+            block.block_hash(),
+            block.parent_hash(),
+            block.pre_tree_size(),
+            block.pre_tree_root(),
+            block.post_tree_size(),
+            block.post_tree_root(),
+            block.commitment(),
+        )
+        .unwrap();
+        let authenticated = block.authenticate(header).unwrap();
+        let account =
+            WalletScanAccount::new(WalletAccountId::from_bytes([0x45; 32]).unwrap(), owner);
+        let update = scan_finalized_block(&tip, &authenticated, &[account]).unwrap();
+        assert_eq!(update.detected_notes().len(), actions_per_block);
+        database.commit_finalized_block(update).unwrap();
+    }
 
     fn hash(byte: u8) -> MerkleHashOrchard {
         parse_merkle_hash([byte; 32]).unwrap()
@@ -2882,6 +3828,349 @@ mod tests {
         assert_eq!(
             decode_recovery_state(&[1, 0, 0]).unwrap_err(),
             WalletDbError::CorruptState
+        );
+    }
+
+    #[test]
+    fn legacy_migration_requires_backup_and_restore_upgrades_the_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = test_path(directory.path(), "wallet.sqlite3");
+        let backup_path = test_path(directory.path(), "wallet-v1.backup");
+        let occupied_backup_path = test_path(directory.path(), "occupied.backup");
+        let restored_path = test_path(directory.path(), "wallet-restored.sqlite3");
+        let database =
+            EncryptedWalletDb::create(&path, &TEST_ROOT_KEY, test_config(), test_tip()).unwrap();
+        drop(database);
+        convert_current_fixture_to_legacy(&path);
+
+        assert_eq!(
+            EncryptedWalletDb::open(
+                &path,
+                &TEST_ROOT_KEY,
+                ChainId::new(TEST_CHAIN),
+                TEST_WALLET,
+                0,
+            )
+            .unwrap_err(),
+            WalletDbError::UnsupportedSchema
+        );
+        fs::write(&occupied_backup_path, b"do not replace").unwrap();
+        assert_eq!(
+            EncryptedWalletDb::migrate_legacy_v1(
+                &path,
+                &occupied_backup_path,
+                &TEST_ROOT_KEY,
+                ChainId::new(TEST_CHAIN),
+                TEST_WALLET,
+                0,
+            )
+            .unwrap_err(),
+            WalletDbError::AlreadyExists
+        );
+        assert_eq!(fs::read(&occupied_backup_path).unwrap(), b"do not replace");
+        assert_eq!(
+            EncryptedWalletDb::open(
+                &path,
+                &TEST_ROOT_KEY,
+                ChainId::new(TEST_CHAIN),
+                TEST_WALLET,
+                0,
+            )
+            .unwrap_err(),
+            WalletDbError::UnsupportedSchema
+        );
+        let migrated = EncryptedWalletDb::migrate_legacy_v1(
+            &path,
+            &backup_path,
+            &TEST_ROOT_KEY,
+            ChainId::new(TEST_CHAIN),
+            TEST_WALLET,
+            0,
+        )
+        .unwrap();
+        assert!(backup_path.exists());
+        assert_eq!(migrated.load_tip().unwrap(), test_tip());
+        assert_eq!(
+            migrated.recovery_status().unwrap(),
+            WalletRecoveryStatus::NotRequired
+        );
+        drop(migrated);
+        assert_eq!(
+            Connection::open(&path)
+                .unwrap()
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        let redundant_backup_path = test_path(directory.path(), "redundant.backup");
+        assert_eq!(
+            EncryptedWalletDb::migrate_legacy_v1(
+                &path,
+                &redundant_backup_path,
+                &TEST_ROOT_KEY,
+                ChainId::new(TEST_CHAIN),
+                TEST_WALLET,
+                0,
+            )
+            .unwrap_err(),
+            WalletDbError::UnsupportedSchema
+        );
+        assert!(!redundant_backup_path.exists());
+
+        let restored = EncryptedWalletDb::restore_backup(
+            &backup_path,
+            &restored_path,
+            &TEST_ROOT_KEY,
+            ChainId::new(TEST_CHAIN),
+            TEST_WALLET,
+            0,
+        )
+        .unwrap();
+        assert_eq!(restored.load_tip().unwrap(), test_tip());
+        assert_eq!(
+            restored.recovery_status().unwrap(),
+            WalletRecoveryStatus::NotRequired
+        );
+        drop(restored);
+        assert_eq!(
+            Connection::open(&restored_path)
+                .unwrap()
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn every_legacy_migration_stage_rolls_back_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        for stage in 1..=9 {
+            let path = test_path(directory.path(), &format!("wallet-stage-{stage}.sqlite3"));
+            let database =
+                EncryptedWalletDb::create(&path, &TEST_ROOT_KEY, test_config(), test_tip())
+                    .unwrap();
+            drop(database);
+            convert_current_fixture_to_legacy(&path);
+
+            let lock = open_lock(&path).unwrap();
+            let legacy = EncryptedWalletDb::open_legacy_locked(
+                &path,
+                &TEST_ROOT_KEY,
+                ChainId::new(TEST_CHAIN),
+                TEST_WALLET,
+                0,
+                lock,
+            )
+            .unwrap();
+            assert_eq!(
+                legacy
+                    .migrate_legacy_in_place(&path, &TEST_ROOT_KEY, Some(stage))
+                    .unwrap_err(),
+                WalletDbError::DatabaseFailure
+            );
+
+            let lock = open_lock(&path).unwrap();
+            let reopened = EncryptedWalletDb::open_legacy_locked(
+                &path,
+                &TEST_ROOT_KEY,
+                ChainId::new(TEST_CHAIN),
+                TEST_WALLET,
+                0,
+                lock,
+            )
+            .unwrap();
+            assert_eq!(reopened.load_tip().unwrap(), test_tip());
+            drop(reopened);
+            let connection = Connection::open(&path).unwrap();
+            assert_eq!(
+                connection
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_schema
+                         WHERE type = 'table' AND name = 'wallet_recovery'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_migration_reseals_nonempty_notes_shards_and_checkpoints() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = test_path(directory.path(), "wallet-nonempty.sqlite3");
+        let backup_path = test_path(directory.path(), "wallet-nonempty-v1.backup");
+        let restored_path = test_path(directory.path(), "wallet-nonempty-restored.sqlite3");
+        let mut database =
+            EncryptedWalletDb::create(&path, &TEST_ROOT_KEY, test_config(), test_tip()).unwrap();
+        let spend_nullifier = commit_test_note(&mut database);
+        let expected_tip = database.load_tip().unwrap();
+        assert_eq!(expected_tip.height(), 1);
+        drop(database);
+        let connection = Connection::open(&path).unwrap();
+        assert!(
+            connection
+                .query_row("SELECT count(*) FROM wallet_notes", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap()
+                > 0
+        );
+        assert!(
+            connection
+                .query_row("SELECT count(*) FROM tree_shards", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap()
+                > 0
+        );
+        drop(connection);
+        convert_current_fixture_to_legacy(&path);
+
+        let migrated = EncryptedWalletDb::migrate_legacy_v1(
+            &path,
+            &backup_path,
+            &TEST_ROOT_KEY,
+            ChainId::new(TEST_CHAIN),
+            TEST_WALLET,
+            1,
+        )
+        .unwrap();
+        assert_eq!(migrated.load_tip().unwrap(), expected_tip);
+        assert_eq!(
+            migrated
+                .witness_for_spend(spend_nullifier)
+                .unwrap()
+                .decrypted()
+                .note()
+                .value(),
+            123_456
+        );
+        drop(migrated);
+
+        let restored = EncryptedWalletDb::restore_backup(
+            &backup_path,
+            &restored_path,
+            &TEST_ROOT_KEY,
+            ChainId::new(TEST_CHAIN),
+            TEST_WALLET,
+            1,
+        )
+        .unwrap();
+        assert_eq!(restored.load_tip().unwrap(), expected_tip);
+        assert_eq!(
+            restored
+                .witness_for_spend(spend_nullifier)
+                .unwrap()
+                .decrypted()
+                .note()
+                .value(),
+            123_456
+        );
+    }
+
+    #[test]
+    #[ignore = "opt-in external H1-A2 migration acceptance campaign"]
+    fn h1_a2_external_legacy_migration_campaign() {
+        let directory = std::env::var_os("VAULT_H1_A2_MIGRATION_DIR")
+            .map(PathBuf::from)
+            .and_then(|path| fs::canonicalize(path).ok())
+            .expect("VAULT_H1_A2_MIGRATION_DIR must be an existing canonical directory");
+        let blocks = std::env::var("VAULT_H1_A2_MIGRATION_BLOCKS")
+            .unwrap_or_else(|_| "10000".to_owned())
+            .parse::<u64>()
+            .expect("migration block count is an integer");
+        let actions_per_block = std::env::var("VAULT_H1_A2_MIGRATION_ACTIONS")
+            .unwrap_or_else(|_| "2".to_owned())
+            .parse::<usize>()
+            .expect("migration action count is an integer");
+        let max_checkpoints = std::env::var("VAULT_H1_A2_MIGRATION_CHECKPOINTS")
+            .unwrap_or_else(|_| "100".to_owned())
+            .parse::<usize>()
+            .expect("migration checkpoint count is an integer");
+        assert!((1..=1_000_000).contains(&blocks));
+        assert!([2, 4, 8, 16].contains(&actions_per_block));
+        assert!((1..=MAX_CHECKPOINTS_LIMIT).contains(&max_checkpoints));
+
+        let path = directory.join("wallet-migration.sqlite3");
+        let backup_path = directory.join("wallet-migration-v1.vwb");
+        let restored_path = directory.join("wallet-migration-restored.sqlite3");
+        assert!(!path.exists() && !backup_path.exists() && !restored_path.exists());
+        let config = WalletDatabaseConfig::new(
+            TEST_WALLET,
+            test_config().maximum_note_value(),
+            max_checkpoints,
+        )
+        .unwrap();
+        let mut database =
+            EncryptedWalletDb::create(&path, &TEST_ROOT_KEY, config, test_tip()).unwrap();
+        let owner = VaultSpendingKey::derive(&[0x44; 32], TEST_CHAIN, 0)
+            .unwrap()
+            .full_viewing_key();
+        let history_started = std::time::Instant::now();
+        let progress_interval = (blocks / 100).max(1);
+        for height in 1..=blocks {
+            commit_acceptance_history_block(&mut database, &owner, height, actions_per_block);
+            if height % progress_interval == 0 || height == blocks {
+                println!(
+                    "migration_fixture_progress height={height} elapsed_seconds={:.3} database_bytes={}",
+                    history_started.elapsed().as_secs_f64(),
+                    fs::metadata(&path).unwrap().len()
+                );
+            }
+        }
+        let expected_tip = database.load_tip().unwrap();
+        drop(database);
+        convert_current_fixture_to_legacy(&path);
+        let legacy_bytes = fs::metadata(&path).unwrap().len();
+
+        let migration_started = std::time::Instant::now();
+        let migrated = EncryptedWalletDb::migrate_legacy_v1(
+            &path,
+            &backup_path,
+            &TEST_ROOT_KEY,
+            ChainId::new(TEST_CHAIN),
+            TEST_WALLET,
+            blocks,
+        )
+        .unwrap();
+        assert_eq!(migrated.load_tip().unwrap(), expected_tip);
+        let migration_seconds = migration_started.elapsed().as_secs_f64();
+        drop(migrated);
+
+        let restore_started = std::time::Instant::now();
+        let restored = EncryptedWalletDb::restore_backup(
+            &backup_path,
+            &restored_path,
+            &TEST_ROOT_KEY,
+            ChainId::new(TEST_CHAIN),
+            TEST_WALLET,
+            blocks,
+        )
+        .unwrap();
+        assert_eq!(restored.load_tip().unwrap(), expected_tip);
+        drop(restored);
+        let note_rows = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT count(*) FROM wallet_notes", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+        assert_eq!(
+            note_rows,
+            i64::try_from(blocks).unwrap() * i64::try_from(actions_per_block).unwrap()
+        );
+        println!(
+            "migration_complete blocks={blocks} actions_per_block={actions_per_block} note_rows={note_rows} legacy_bytes={legacy_bytes} migrated_bytes={} backup_bytes={} restored_bytes={} migration_seconds={migration_seconds:.3} restore_seconds={:.3}",
+            fs::metadata(&path).unwrap().len(),
+            fs::metadata(&backup_path).unwrap().len(),
+            fs::metadata(&restored_path).unwrap().len(),
+            restore_started.elapsed().as_secs_f64()
         );
     }
 }

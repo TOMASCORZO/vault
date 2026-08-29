@@ -2,8 +2,10 @@
 //!
 //! The authorization packet contains wallet-private note construction data and
 //! MUST travel only over an authenticated confidential channel. Its fixed codec
-//! is intended for local, hardware, multisignature, and delegated-prover
-//! transports; it is never a consensus or block encoding.
+//! is intended for local, hardware, and multisignature signer transports; it is
+//! never a consensus or block encoding. Delegated proving uses a separate
+//! committed witness package because this packet is not the complete circuit
+//! witness.
 
 use core::fmt;
 
@@ -19,6 +21,8 @@ use subtle::ConstantTimeEq;
 use zcash_note_encryption::Domain;
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(feature = "circuit")]
+use crate::PrivateNote;
 use crate::{
     ActionNullifier, EncryptedNote, KeyScope, MEMO_BYTES, NOTE_CIPHERTEXT_BYTES,
     OUTGOING_CIPHERTEXT_BYTES, PreparedNoteOutput, VaultAddress, VaultFullViewingKey,
@@ -264,6 +268,45 @@ impl PreparedNoteOutput {
 }
 
 impl OutputAuthorizationPacket {
+    /// Reconstructs the exact private output consumed by the selected circuit.
+    ///
+    /// This is available only with the heavy `circuit` feature. It performs
+    /// the same byte-exact output checks as signer authorization but returns no
+    /// spend-authorization token and therefore grants no signing authority.
+    #[cfg(feature = "circuit")]
+    pub fn into_proving_witness(
+        self,
+        full_viewing_key: &VaultFullViewingKey,
+        expected_network_id: [u8; 32],
+        expected_action_nullifier: ActionNullifier,
+        expected_output: &EncryptedNote,
+        maximum_value: u64,
+    ) -> Result<(PreparedNoteOutput, OutputKind), OutputAuthorizationError> {
+        self.verify_construction(
+            full_viewing_key,
+            expected_network_id,
+            expected_action_nullifier,
+            expected_output,
+            maximum_value,
+        )?;
+        let note = PrivateNote {
+            recipient: self.recipient,
+            value: self.value,
+            rho: self.action_nullifier.0,
+            rseed: Zeroizing::new(*self.rseed),
+        };
+        Ok((
+            PreparedNoteOutput {
+                note,
+                output: self.output.clone(),
+                value_commitment_trapdoor: Zeroizing::new(*self.value_commitment_trapdoor),
+                sender_scope: self.sender_scope,
+                memo: Zeroizing::new(*self.memo),
+            },
+            self.kind,
+        ))
+    }
+
     /// Serializes one exact, non-extensible packet. The returned allocation is
     /// zeroized when dropped.
     #[must_use]
@@ -367,6 +410,38 @@ impl OutputAuthorizationPacket {
         {
             return Err(OutputAuthorizationError::IntentMismatch);
         }
+        self.verify_construction(
+            full_viewing_key,
+            intent.network_id,
+            intent.action_nullifier,
+            expected_output,
+            maximum_value,
+        )?;
+
+        Ok(VerifiedOutputAuthorization {
+            network_id: self.network_id,
+            action_nullifier: self.action_nullifier,
+            output: self.output.clone(),
+            kind: self.kind,
+            packet_digest: self.transport_digest(),
+            signer_fingerprint: signer_fingerprint(full_viewing_key),
+        })
+    }
+
+    fn verify_construction(
+        &self,
+        full_viewing_key: &VaultFullViewingKey,
+        expected_network_id: [u8; 32],
+        expected_action_nullifier: ActionNullifier,
+        expected_output: &EncryptedNote,
+        maximum_value: u64,
+    ) -> Result<(), OutputAuthorizationError> {
+        if self.network_id != expected_network_id {
+            return Err(OutputAuthorizationError::NetworkMismatch);
+        }
+        if self.action_nullifier != expected_action_nullifier {
+            return Err(OutputAuthorizationError::IntentMismatch);
+        }
         if self.value > maximum_value {
             return Err(OutputAuthorizationError::InvalidClassification);
         }
@@ -431,13 +506,35 @@ impl OutputAuthorizationPacket {
             return Err(OutputAuthorizationError::OutgoingCiphertextMismatch);
         }
 
-        Ok(VerifiedOutputAuthorization {
-            network_id: self.network_id,
-            action_nullifier: self.action_nullifier,
-            output: self.output.clone(),
+        Ok(())
+    }
+
+    /// Validates an output packet as a private zkVM reference witness.
+    ///
+    /// This method is feature-gated out of wallet and signer builds. Unlike
+    /// [`Self::verify`], it does not represent user intent approval and cannot
+    /// mint a signing token; it only returns private values to the isolated
+    /// reference statement after exact reconstruction succeeds.
+    #[cfg(feature = "reference-oracle")]
+    pub fn verify_reference_witness(
+        &self,
+        full_viewing_key: &VaultFullViewingKey,
+        expected_network_id: [u8; 32],
+        expected_action_nullifier: ActionNullifier,
+        expected_output: &EncryptedNote,
+        maximum_value: u64,
+    ) -> Result<ReferenceOutputWitness, OutputAuthorizationError> {
+        self.verify_construction(
+            full_viewing_key,
+            expected_network_id,
+            expected_action_nullifier,
+            expected_output,
+            maximum_value,
+        )?;
+        Ok(ReferenceOutputWitness {
+            recipient: self.recipient,
+            value: self.value,
             kind: self.kind,
-            packet_digest: self.transport_digest(),
-            signer_fingerprint: signer_fingerprint(full_viewing_key),
         })
     }
 
@@ -449,6 +546,36 @@ impl OutputAuthorizationPacket {
         let mut hasher = blake3::Hasher::new_derive_key(PACKET_DIGEST_DOMAIN);
         hasher.update(encoded.as_ref());
         *hasher.finalize().as_bytes()
+    }
+}
+
+/// Private output facts released only to the isolated reference statement.
+#[cfg(feature = "reference-oracle")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReferenceOutputWitness {
+    recipient: VaultAddress,
+    value: u64,
+    kind: OutputKind,
+}
+
+#[cfg(feature = "reference-oracle")]
+impl ReferenceOutputWitness {
+    /// Reconstructed private recipient.
+    #[must_use]
+    pub const fn recipient(self) -> VaultAddress {
+        self.recipient
+    }
+
+    /// Reconstructed private output value.
+    #[must_use]
+    pub const fn value(self) -> u64 {
+        self.value
+    }
+
+    /// Reconstructed external/change/dummy classification.
+    #[must_use]
+    pub const fn kind(self) -> OutputKind {
+        self.kind
     }
 }
 

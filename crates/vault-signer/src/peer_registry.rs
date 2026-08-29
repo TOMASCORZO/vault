@@ -1,5 +1,9 @@
 use core::fmt;
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Arc,
+};
 
 use blake3::Hasher;
 use chacha20poly1305::{
@@ -10,9 +14,11 @@ use rand_core::{CryptoRng, RngCore};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::durable_file::{DurableFileError, LockedAtomicFile};
+use crate::transport::SignerSessionGate;
 use crate::{
-    PAIRED_SIGNER_RECORD_BYTES, PairedSignerRecord, PairingFingerprint, SignerHandshake,
-    SignerPairingRole, SignerTransportKeyPair,
+    PAIRED_SIGNER_RECORD_BYTES, PairedSignerRecord, PairingFingerprint, PeerLifecycleAction,
+    PeerLifecycleConfirmationFacts, SignerHandshake, SignerPairingRole, SignerTransportKeyPair,
+    TrustedPeerConfirmation,
 };
 
 const REGISTRY_MAGIC: [u8; 4] = *b"VPRG";
@@ -72,6 +78,8 @@ pub enum PeerRegistryError {
     PeerRevoked,
     /// Rotation did not preserve the local network/role identity or fresh key.
     RotationRejected,
+    /// Trusted peer-management confirmation rejected or failed.
+    ConfirmationFailed,
     /// Entropy or AEAD processing could not produce the next envelope.
     CryptographicFailure,
     /// An operating-system durability operation failed.
@@ -98,6 +106,7 @@ impl fmt::Display for PeerRegistryError {
             Self::PeerNotFound => "peer identity was not found",
             Self::PeerRevoked => "peer identity is revoked",
             Self::RotationRejected => "peer rotation was rejected",
+            Self::ConfirmationFailed => "trusted peer confirmation failed",
             Self::CryptographicFailure => "peer-registry cryptographic operation failed",
             Self::IoFailure => "peer-registry durability operation failed",
             Self::Poisoned => "peer registry is poisoned",
@@ -605,6 +614,7 @@ pub struct EncryptedPeerRegistry {
     file: LockedAtomicFile,
     aead_key: Zeroizing<[u8; 32]>,
     state: RegistryState,
+    session_gates: BTreeMap<PairedPeerId, Arc<SignerSessionGate>>,
     poisoned: bool,
 }
 
@@ -646,6 +656,7 @@ impl EncryptedPeerRegistry {
             file,
             aead_key,
             state,
+            session_gates: BTreeMap::new(),
             poisoned: false,
         })
     }
@@ -664,10 +675,21 @@ impl EncryptedPeerRegistry {
             .map_err(map_durable_error)?
             .ok_or(PeerRegistryError::StoreMissing)?;
         let state = open_envelope(&envelope, &aead_key, scope)?;
+        let session_gates = state
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.id,
+                    SignerSessionGate::new(entry.state == PairedPeerState::Active),
+                )
+            })
+            .collect();
         Ok(Self {
             file,
             aead_key,
             state,
+            session_gates,
             poisoned: false,
         })
     }
@@ -710,15 +732,22 @@ impl EncryptedPeerRegistry {
         });
         candidate.entries.sort_by_key(|entry| entry.id);
         self.commit(candidate, rng)?;
+        self.session_gates.insert(id, SignerSessionGate::new(true));
         Ok(id)
     }
 
-    /// Atomically writes a permanent tombstone before returning success.
-    pub fn revoke<R: RngCore + CryptoRng>(
+    /// Requires trusted confirmation, then atomically writes a permanent
+    /// tombstone before returning success.
+    pub fn revoke_confirmed<R, C>(
         &mut self,
         id: PairedPeerId,
+        confirmation: &mut C,
         rng: &mut R,
-    ) -> Result<(), PeerRegistryError> {
+    ) -> Result<(), PeerRegistryError>
+    where
+        R: RngCore + CryptoRng,
+        C: TrustedPeerConfirmation,
+    {
         self.ensure_usable()?;
         let index = self
             .state
@@ -729,21 +758,39 @@ impl EncryptedPeerRegistry {
             return Err(PeerRegistryError::PeerRevoked);
         }
         let generation = self.state.next_generation()?;
+        let facts = PeerLifecycleConfirmationFacts::new(
+            PeerLifecycleAction::Revoke,
+            self.state.scope.network_id,
+            self.state.scope.role,
+            id,
+            self.state.entries[index].record.fingerprint(),
+            None,
+            self.state.generation,
+        );
+        confirmation
+            .confirm_peer_lifecycle(&facts)
+            .map_err(|_| PeerRegistryError::ConfirmationFailed)?;
         let mut candidate = self.state.clone();
         candidate.generation = generation;
         candidate.entries[index].state = PairedPeerState::Revoked;
         candidate.entries[index].revoked_generation = generation;
+        self.session_gate(id)?.shut_down();
         self.commit(candidate, rng)
     }
 
     /// In one durable generation, tombstones an active peer and installs a
     /// freshly confirmed identity with a different remote static key.
-    pub fn rotate<R: RngCore + CryptoRng>(
+    pub fn rotate_confirmed<R, C>(
         &mut self,
         old_id: PairedPeerId,
         replacement: PairedSignerRecord,
+        confirmation: &mut C,
         rng: &mut R,
-    ) -> Result<PairedPeerId, PeerRegistryError> {
+    ) -> Result<PairedPeerId, PeerRegistryError>
+    where
+        R: RngCore + CryptoRng,
+        C: TrustedPeerConfirmation,
+    {
         self.ensure_usable()?;
         if self.state.entries.len() >= MAX_PAIRED_SIGNER_RECORDS {
             return Err(PeerRegistryError::CapacityExceeded);
@@ -766,6 +813,18 @@ impl EncryptedPeerRegistry {
                 other => other,
             })?;
         let generation = self.state.next_generation()?;
+        let facts = PeerLifecycleConfirmationFacts::new(
+            PeerLifecycleAction::Rotate,
+            self.state.scope.network_id,
+            self.state.scope.role,
+            old_id,
+            self.state.entries[old_index].record.fingerprint(),
+            Some(replacement.fingerprint()),
+            self.state.generation,
+        );
+        confirmation
+            .confirm_peer_lifecycle(&facts)
+            .map_err(|_| PeerRegistryError::ConfirmationFailed)?;
         let mut candidate = self.state.clone();
         candidate.generation = generation;
         candidate.entries[old_index].state = PairedPeerState::Revoked;
@@ -778,7 +837,10 @@ impl EncryptedPeerRegistry {
             record: replacement,
         });
         candidate.entries.sort_by_key(|entry| entry.id);
+        self.session_gate(old_id)?.shut_down();
         self.commit(candidate, rng)?;
+        self.session_gates
+            .insert(new_id, SignerSessionGate::new(true));
         Ok(new_id)
     }
 
@@ -799,10 +861,24 @@ impl EncryptedPeerRegistry {
         if entry.state != PairedPeerState::Active {
             return Err(PeerRegistryError::PeerRevoked);
         }
+        let session_gate = Arc::clone(self.session_gate(id)?);
         entry
             .record
             .open_handshake(local)
+            .map(|handshake| handshake.bind_session_gate(session_gate))
             .map_err(|_| PeerRegistryError::InvalidScope)
+    }
+
+    fn session_gate(&self, id: PairedPeerId) -> Result<&Arc<SignerSessionGate>, PeerRegistryError> {
+        self.session_gates
+            .get(&id)
+            .ok_or(PeerRegistryError::InvalidStore)
+    }
+
+    fn shut_down_all_sessions(&self) {
+        for gate in self.session_gates.values() {
+            gate.shut_down();
+        }
     }
 
     fn active_count(&self) -> usize {
@@ -830,6 +906,7 @@ impl EncryptedPeerRegistry {
         let envelope = seal_state(&candidate, &self.aead_key, rng)?;
         if let Err(error) = self.file.replace(&envelope).map_err(map_durable_error) {
             self.poisoned = true;
+            self.shut_down_all_sessions();
             return Err(error);
         }
         self.state = candidate;
@@ -961,9 +1038,23 @@ mod tests {
     use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
     use super::*;
-    use crate::{SignerPairingHandshake, SignerTransportKeyPair};
+    use crate::{
+        PairingConfirmationFacts, SignerConfirmationError, SignerPairingHandshake,
+        SignerTransportKeyPair, TrustedPairingConfirmation,
+    };
 
     const NETWORK: [u8; 32] = [0x31; 32];
+
+    struct TestPairingConfirmation(PairingFingerprint);
+
+    impl TrustedPairingConfirmation for TestPairingConfirmation {
+        fn confirm_pairing(
+            &mut self,
+            _facts: &PairingConfirmationFacts,
+        ) -> Result<PairingFingerprint, SignerConfirmationError> {
+            Ok(self.0)
+        }
+    }
 
     fn state_with_one_peer() -> (RegistryState, PeerRegistryScope) {
         let mut rng = ChaCha20Rng::from_seed([0xa1; 32]);
@@ -981,7 +1072,9 @@ mod tests {
         let signer = signer.finish().unwrap();
         let fingerprint = coordinator.fingerprint();
         assert_eq!(fingerprint, signer.fingerprint());
-        let record = coordinator.confirm(fingerprint).unwrap();
+        let record = coordinator
+            .confirm(&mut TestPairingConfirmation(fingerprint))
+            .unwrap();
         let scope = PeerRegistryScope::new(
             NETWORK,
             SignerPairingRole::Coordinator,

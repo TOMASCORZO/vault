@@ -9,11 +9,16 @@ nullifiers, diversified keys, and authenticated encrypted notes. Transfer-v2
 now canonically connects those public types to an atomic state transition. Its
 provisional monolithic circuit constrains Action ownership and note openings,
 private accounting, exact burn encryption, the activated epoch key, and the
-complete effects digest, but no consensus verifier or signer-complete wallet
+complete effects digest. The H1-C4 native burn transition now prevents shares
+for aggregates below 128 effects or 16 public windows, carries low volume
+forward without forced reveal, filters invalid DLEQ shares, and bounds aggregate
+recovery by the full supply. No consensus verifier or signer-complete wallet
 flow is activated. A canonical local signing session independently reconstructs
 every Ironwood output and pins the complete transfer policy before signing, but
 hardware, multiparty, and delegated-prover transports are not yet implemented
-or reviewed. Pinned Noise XX first contact, explicit fingerprint confirmation,
+or reviewed. The multisignature and delegated-proving product contracts are
+frozen without enabling their concrete cryptographic or transport adapters.
+Pinned Noise XX first contact, explicit fingerprint confirmation,
 the paired Noise KK channel, a channel-bound one-shot request flow, and a
 crash-consistent Unix replay store are now implemented. Independent review,
 host-rollback-resistant state, non-Unix/hardware adapters, and confirmation and
@@ -62,6 +67,9 @@ Vault cannot guarantee anonymity when:
 - a low-volume cross-chain trade is correlated with its public source-chain leg;
 - network timing or IP metadata bypasses privacy relays;
 - a view capability is disclosed;
+- a delegated prover has already decrypted a transfer witness or the account
+  full-viewing key it contains, because later revocation cannot
+  prove deletion or undo that disclosure;
 - stored content itself contains identifying information.
 
 “Private” must never be marketed as “impossible to trace.” Privacy claims will
@@ -113,8 +121,19 @@ breakers, monitoring, and delayed limit increases.
 - The complete effects digest is represented losslessly by two constrained
   128-bit public limbs; a note-ciphertext or network-domain mutation changes the
   proof statement.
+- Burn aggregation canonically deduplicates finalized effects, binds membership
+  and windows into every DLEQ transcript, refuses individual/low-volume share
+  generation, and carries insufficient volume forward under the same key.
+- Invalid decryption shares are ignored unless fewer than the descriptor
+  threshold remain; bounded recovery has no unbounded or best-effort fallback.
 - The production-intent prover wrapper rejects effects whose encrypted output
   differs from the one constructed with the witnessed private note.
+- Delegated proving remains local-by-default and requires explicit per-job
+  confirmation of complete-witness and account full-viewing disclosure. The
+  remote prover receives no spending key or signature, every returned proof is
+  verified locally against exact effects, and permanent revocation blocks only
+  future disclosure; the dedicated transport and durable lifecycle store are
+  not yet implemented.
 - The private fixed-size `VAOP` v1 packet reconstructs the exact note,
   commitments, ephemeral key, and both ciphertexts against trusted intent
   before producing an opaque account-bound output token.
@@ -143,6 +162,22 @@ breakers, monitoring, and delayed limit increases.
   concurrent access, challenge substitution, and uncertain persistence fail
   closed. Explicit creation and normal opening are separate, so missing state
   cannot silently reset the counter.
+- The host-rollback-resistant signer profile instead keeps the complete exact
+  pending challenge, issued/consumed counters, and transition generation behind
+  a platform `SignerSecureReplayStore` atomic CAS contract. A CAS mismatch or
+  uncertain result poisons the handle. The dedicated Noise private key,
+  registry storage key, registry ID, network and role are likewise one
+  no-clobber protected record. These are enforced interfaces, not claims that a
+  keychain or secure-element adapter has passed physical-device testing.
+- The threshold-wallet profile keeps consensus on the ordinary RedPallas
+  signature and binds exactly `t` selected paired participants to one action,
+  attempt, transaction transcript, effects/signing digest, proof-bound `rk`,
+  confidential-randomizer commitment and complete FROST nonce-commitment set.
+  Every selected participant must confirm the same agreement. Nonces must be
+  durably reserved before exposure and burned before share release or on any
+  abort; a retry uses a fresh attempt and fresh nonces. The crate enforces these
+  contracts and final-signature gate but does not yet implement or claim a
+  reviewed FROST key ceremony, share engine or platform adapter.
 - Canonical bounded request and response codecs cover all activated action
   buckets. Signing is one-shot per action, incomplete sessions release nothing,
   and the coordinator re-verifies transcript, effects digest, `rk`, and every
@@ -193,9 +228,9 @@ breakers, monitoring, and delayed limit increases.
 
 These implemented proof components remain deliberately disconnected from an
 activatable verifier. Independent pairing/store review, host-rollback-resistant
-hardware state, keychain and active-session lifecycle adapters, non-Unix stores,
-hardware/multiparty adapters and trusted-intent UX, corpus vectors and
-benchmarks, DKG lifecycle, wallet security, and
+hardware state, keychain and non-Unix lifecycle adapters, hardware/multiparty
+adapters and concrete reviewed trusted-intent UX, corpus vectors and benchmarks,
+DKG lifecycle, wallet security, and
 external review remain mandatory before activation. A spending owner can always
 authorize an unavailable output or disclose its own information; Vault therefore
 treats successful recipient decryption as a precondition for payment acceptance

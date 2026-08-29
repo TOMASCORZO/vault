@@ -4,7 +4,10 @@ use blake3::Hasher;
 use snow::{Builder, HandshakeState, params::NoiseParams};
 use subtle::ConstantTimeEq;
 
-use crate::{SignerHandshake, SignerTransportError, SignerTransportKeyPair};
+use crate::{
+    PairingConfirmationFacts, SignerHandshake, SignerTransportError, SignerTransportKeyPair,
+    TrustedPairingConfirmation,
+};
 
 const PAIRING_PROLOGUE_DOMAIN: &[u8] = b"vault.signer.noise-xx.prologue.v1";
 const PAIRING_FINGERPRINT_DOMAIN: &str = "vault.signer.pairing-fingerprint.v1";
@@ -330,12 +333,22 @@ impl UnconfirmedSignerPairing {
         self.fingerprint
     }
 
-    /// Converts this one-shot unconfirmed transcript into a persistent record
-    /// only when the independently obtained value matches in constant time.
-    pub fn confirm(
+    /// Converts this one-shot transcript into a persistent record only when a
+    /// trusted independent surface returns the matching value.
+    pub fn confirm<C: TrustedPairingConfirmation>(
         self,
-        independently_observed: PairingFingerprint,
+        confirmation: &mut C,
     ) -> Result<PairedSignerRecord, SignerPairingError> {
+        let facts = PairingConfirmationFacts::new(
+            self.role,
+            self.network_id,
+            self.local_public,
+            self.remote_public,
+            self.fingerprint,
+        );
+        let independently_observed = confirmation
+            .confirm_pairing(&facts)
+            .map_err(|_| SignerPairingError::ConfirmationFailed)?;
         if !self.fingerprint.matches(independently_observed) {
             return Err(SignerPairingError::ConfirmationFailed);
         }

@@ -4,7 +4,7 @@
 durable progress, and birthday-frontier initialization implemented; custody,
 checkpoint distribution, operational UX, fault injection, and independent review
 remain activation gates  
-**Last updated:** 2026-08-23
+**Last updated:** 2026-08-27
 
 ## 1. Purpose and safety boundary
 
@@ -158,6 +158,14 @@ explicit progress fields. `witness_for_spend` refuses to release a witness until
 recovery is complete, preventing partial state from entering the signing path.
 An exhausted database also refuses future block commits.
 
+`WalletRecoveryStatus::product_state()` is the mandatory fail-closed product
+mapping. `Scanning` forbids a final balance and spending.
+`RestartWithLargerAccountRange` supplies the minimum contiguous account count
+that can satisfy the observed highest account plus the configured trailing gap.
+If that minimum exceeds 64, `UnsupportedAccountRange` stops instead of
+proposing a futile rescan. Only `Ready` passes the recovery gate, and even then
+current finalized synchronization remains a separate H2 requirement.
+
 Streaming backup includes the complete encrypted state. Restore validates it
 before no-clobber publication, so an interrupted recovery can be backed up,
 restored, and resumed without being relabeled complete.
@@ -178,7 +186,30 @@ restored, and resumed without being relabeled complete.
 7. Treat `InProgress` and `RequiresLargerAccountRange` as non-final. Do not show
    a definitive balance or build spends.
 8. After `Complete`, verify recovered note witnesses, advance the external
-   monotonic rollback floor, and create and test an authenticated backup.
+   rollback anchor through the two-phase custody protocol in
+   [`WALLET_CUSTODY_V1.md`](WALLET_CUSTODY_V1.md), and create and test an
+   authenticated backup.
+
+### 7.1 Checkpoint provenance and product ceremony
+
+The birthday frontier and target header are accepted only after a configured
+trust path has established their consensus/finality provenance. Multiple
+ordinary RPC responses are availability/cross-check evidence, not finality.
+The product must display network identity, checkpoint/target heights, the
+source class (local validating node, reviewed light client, or authenticated
+offline checkpoint package), and whether the birthday was conservative or
+manually overridden. A manual birthday override requires an explicit warning
+that omitted earlier outputs cannot be discovered from the resulting database
+and must always offer genesis recovery.
+
+An offline package must be versioned, network/genesis-bound, integrity-
+authenticated by the deployment trust root, and contain the exact finalized
+birthday header/frontier plus target header used to build
+`WalletRecoveryPlan`. Its parser must reproduce the existing typed header,
+frontier, and plan validation; it cannot create a weaker constructor. Selecting
+the deployment trust root, signing/revocation format, consensus validation that
+produces the package, and network distribution remain outside this local H1
+interface and must be completed with H2/release governance.
 
 ## 8. Leakage and remaining gates
 
@@ -196,13 +227,13 @@ Still required before real funds:
   conservative user-facing override ceremony;
 - a concrete validating full-node/light-client source plus private/padded
   compact-block transport; ordinary RPC agreement is not consensus finality;
-- reviewed product UX that never presents incomplete recovery as final;
+- platform review of the typed product UX and conservative override ceremony;
 - benchmarked policy for more than 64 accounts and worst-case scan CPU/memory;
 - large-history, shard-boundary, pruning, and finalized-source adversarial tests;
 - crash, power-loss, disk-full, partial-write, and interrupted-recovery fault
   injection on every declared platform;
 - private/padded compact retrieval and access-pattern/timing measurements;
-- versioned migrations, recovery drills, corpus fuzzing, and independent
+- future versioned migrations, scheduled recovery drills, corpus fuzzing, and independent
   wallet/storage review.
 
 No real funds may use this path until these gates and the wider H1/H2 release

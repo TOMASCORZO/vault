@@ -1,10 +1,11 @@
 # Vault encrypted finalized-wallet database v1
 
 **Status:** production-intent Unix database, authenticated backup/restore,
-finalized birthday frontier, and durable seed-recovery state; seed custody, migration,
-platform-keystore, fault-injection, side-channel, and independent-review gates
-remain open  
-**Last updated:** 2026-08-23
+finalized birthday frontier, durable seed-recovery state, schema-1 to schema-2
+migration, bounded checkpoint retention, and validated compaction; seed
+custody, future-schema, platform-keystore, executed external fault/side-channel,
+and independent-review gates remain open
+**Last updated:** 2026-08-27
 
 ## 1. Security boundary
 
@@ -15,12 +16,14 @@ substitution under an uncompromised 32-byte root key. It does not hide the
 SQLite schema, file size, table cardinalities, shard indices, checkpoint
 heights, open/commit timing, page access, or backup age.
 
-The root key is never stored in this database. The caller MUST obtain it from a
-platform keystore or hardware-backed derivation profile that is not implemented
-yet. The caller MUST also supply a monotonic minimum finalized height when
-opening. This detects restoration below a secure external floor, but the
-database cannot itself make that floor rollback-resistant. Passing an obsolete
-floor does not prevent restoration of an older otherwise valid snapshot.
+The root key is never stored in this database. `WalletRootKey` and
+`WalletRootKeyStore` define the independent random zeroizing key and protected
+platform slot, but real platform adapters are not implemented yet. The legacy
+raw open path accepts a monotonic minimum finalized height; this detects only
+restoration below that caller-provided floor and cannot make the floor
+rollback-resistant. Production integration must use the exact-anchor two-phase
+`RollbackProtectedWalletDb` protocol specified in
+[`WALLET_CUSTODY_V1.md`](WALLET_CUSTODY_V1.md).
 
 Only authenticated finalized blocks enter this store. Unfinalized notes and
 ordinary chain reorganization are outside this state machine.
@@ -177,6 +180,58 @@ inconsistency. Spend-witness extraction is disabled until the authenticated
 phase is complete. Full construction and recovery semantics are specified in
 [`WALLET_RECOVERY_V1.md`](WALLET_RECOVERY_V1.md).
 
+### 6.1 Schema-1 to schema-2 migration
+
+`EncryptedWalletDb::migrate_legacy_v1` is the only public in-place migration
+entry point. It accepts exactly schema 1, authenticates the complete legacy
+state under schema-1 record AAD, requires a genesis origin, and publishes a
+non-overwriting authenticated legacy backup before beginning the database
+transaction. A missing, unsafe, or existing backup destination prevents any
+migration write.
+
+Inside one exclusive SQLite transaction, every encrypted tip, origin, note,
+shard, cap, checkpoint, retained-checkpoint marker, and key-check record is
+opened under schema-1 AAD and resealed with fresh randomness under schema-2
+AAD. The metadata table is replaced with its exact schema-2 constraint, a
+canonical encrypted `NotRequired` recovery record is inserted, and both public
+schema version fields advance to 2. Any error rolls the complete transaction
+back; an uncertain rollback returns `Poisoned`. The published schema-1 backup
+is deliberately retained.
+
+Schema-1 birthday databases are not migrated. They predate the authenticated
+target, account-set commitment, account-gap, activity mask, and completion
+phase needed by schema 2, so inventing `NotRequired` would make incomplete
+recovery appear spendable. They must instead be recovered into a new database
+from a conservative authenticated birthday. Unknown schemas, attempts to apply
+the legacy migration to schema 2, and downgrade attempts fail closed.
+
+Restoring an authenticated schema-1 backup with the current implementation
+validates and migrates the temporary snapshot before its no-clobber publication.
+The original backup remains unchanged, and the restored destination is always
+schema 2.
+
+### 6.2 Checkpoint retention and compaction
+
+`max_checkpoints` is immutable authenticated database policy in 1..4096 and is
+passed directly to ShardTree for every create, open, validation, witness, and
+commit operation. It caps ordinary finalized checkpoints; required reference
+and mark state for the authenticated origin and unspent-note witnesses is not
+discarded merely to meet that ordinary count. Full validation separately
+rejects more than 8192 checkpoint rows or more than 4096 retained-checkpoint
+markers, checks every checkpoint codec and mark removal, reconstructs the tree,
+and reconciles the effective marked positions with all decrypted unspent notes.
+
+`EncryptedWalletDb::compact` is the only compaction entry point. The operational
+layer MUST first create, byte-verify, and successfully drill a current backup.
+The method fully validates the open state, records file/page/free-list sizes,
+runs SQLite `VACUUM` under the existing exclusive wallet lock, synchronizes the
+database file, validates the complete state again, and requires a zero free
+list. A definite `VACUUM` failure returns `DatabaseFailure` only if the original
+database still validates; an invalid post-failure state permanently poisons the
+handle. Compaction never changes the logical tip, notes, witnesses, recovery
+state, origin, or retention policy and can require temporary space comparable
+to the database.
+
 `witness_for_spend` accepts a known owned spend nullifier, rejects missing or
 spent notes, derives the depth-32 path at the exact finalized tip checkpoint,
 converts it into Vault's canonical membership-path type, and verifies the note
@@ -187,17 +242,20 @@ The returned type redacts all fields from `Debug`.
 
 This implementation is not release-ready. H1 still requires:
 
-- hardware/keychain root-key handling and a monotonic rollback counter;
+- real hardware/keychain root-key and rollback-state adapters on every declared
+  platform, plus physical failure evidence for the implemented exact-anchor
+  protocol;
 - approved seed custody/import, trusted birthday/target distribution,
   a validating full-node/light-client recovery source, private retrieval,
-  product incomplete-recovery UX, policy above 64 accounts, backup rotation,
-  restore drills, multi-copy inventory,
+  product incomplete-recovery UX, policy above 64 accounts, executed scheduled
+  backup rotation/restore drills, protected multi-copy inventory,
   and disaster-recovery documentation;
-- versioned migrations with upgrade/downgrade and interrupted-migration tests;
-- checkpoint-retention policy, bounded pruning measurements, database compaction,
-  and long-history/storage-growth benchmarks;
-- process-crash, power-loss, disk-full, partial-write, filesystem, and SQLite
-  fault injection on declared platforms;
+- an explicit reviewed path and fixtures for every future schema version; the
+  implemented 1-to-2 path does not authorize downgrade or skipping versions;
+- target-host long-history/pruning/compaction measurements and external
+  migration/backup/restore stress execution;
+- sustained process-crash plus power-loss, disk-full, partial-write, filesystem,
+  and SQLite fault injection on every declared platform;
 - private/padded compact-block retrieval and access-pattern/timing/cache
   measurements; row encryption does not make node traffic anonymous;
 - memory-locking/crash-dump policy and review of unavoidable plaintext copies;
@@ -225,3 +283,15 @@ origin ciphertext tampering. Seed-recovery tests additionally cover deterministi
 multi-batch account derivation, wrong account-set and target rollback, resumable
 incomplete state, spend blocking, conservative gap completion, explicit range
 exhaustion, backup preservation, and recovery-record authentication.
+Migration tests additionally cover a required no-clobber backup, non-empty
+note/witness preservation, schema-1 backup restore into schema 2, refusal to
+reapply the legacy migration, and atomic rollback after each of nine logical
+migration stages.
+Backup-operation tests additionally bind a published receipt to exact copied
+bytes, reject a damaged copy, and complete the exact restore path in protected
+disposable storage. Compaction tests preserve a current spend witness and
+require non-increasing file/page counts after complete revalidation. The
+bounded long-history, owned-note, legacy-migration, process-crash, ENOSPC, and
+Linux `perf` harnesses are specified in
+[`../research/H1-A2-WALLET-HARDENING.md`](../research/H1-A2-WALLET-HARDENING.md);
+small local runner checks are not external acceptance evidence.

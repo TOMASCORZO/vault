@@ -1,7 +1,7 @@
 # Vault encrypted wallet backup v1
 
 **Status:** production-intent implementation and adversarial tests complete; operational recovery gates remain  
-**Last updated:** 2026-08-23
+**Last updated:** 2026-08-27
 
 ## 1. Purpose and non-goals
 
@@ -16,6 +16,14 @@ Network, persistent wallet/database identifiers, exact snapshot length,
 configuration, finalized height, and tip hash are in the encrypted manifest.
 Independent exports are not linkable by those fields; byte-for-byte copies of
 one backup remain trivially linkable.
+
+A successful export returns a redacted local receipt containing its public
+random backup ID, authenticated finalized height, snapshot/container lengths,
+and a domain-separated BLAKE3 digest of the complete container bytes. The
+digest is computed while streaming publication and is not embedded in the
+container. It is copy/inventory evidence, not a replacement for AEAD
+authentication. Receipts disclose backup timing/height relationships and MUST
+be kept with protected operational metadata.
 
 The format does not hide that a backup exists, its bucketed size, creation or
 access timing, destination path, or host/network metadata around storage. It is
@@ -140,10 +148,21 @@ checkpoint tip, retained markers, and complete owned-note/mark reconciliation.
 Database ID, policy, exact tip height, and tip block hash MUST equal the
 encrypted manifest.
 
+The current restorer also accepts an authenticated snapshot whose internal
+wallet schema is 1. It validates the complete legacy state and applies the
+normative schema-1 to schema-2 transaction from
+[`WALLET_DB_V1.md`](WALLET_DB_V1.md) to the temporary file before publication.
+Only genesis-origin schema-1 state is eligible; a legacy birthday database is
+rejected because its missing durable recovery-completeness fields cannot be
+reconstructed safely. The source container is never modified, and the new
+destination is published only after schema-2 open validation succeeds.
+
 A correct monotonic floor detects restoration below the last externally
 recorded height. The container cannot prevent rollback if an attacker can also
-roll back that external state. Hardware/keychain rollback state and its atomic
-update protocol remain an H1 activation gate.
+roll back that external state. The exact-anchor prepare/commit/finalize protocol
+and adapter contract are now specified in
+[`WALLET_CUSTODY_V1.md`](WALLET_CUSTODY_V1.md); real hardware/keychain adapters
+and physical rollback evidence remain H1 activation gates.
 
 ## 6. Bounds and failure behavior
 
@@ -172,11 +191,43 @@ first and padding chunk corruption, and cross-backup chunk splicing. Unit tests
 cover canonical bucket bounds, prefix/manifest codecs, reserved bytes, and nonce
 and associated-data separation.
 
-## 8. Remaining recovery gates
+`WalletBackupSummary::verify_copy` streams a protected candidate copy with
+bounded memory and requires exact backup ID, file length, and receipt digest.
+It does not require or test the root key. `EncryptedWalletDb::drill_backup_restore`
+therefore performs the stronger check: it invokes the exact production restore
+path in a protected disposable directory, authenticates and reconciles the full
+wallet database, reports the restored height and database length, then removes
+the temporary destination. It never overwrites a live wallet or deletes a
+backup.
 
-This format does not yet provide seed/key recovery, backup rotation policy,
-multi-copy inventory, cloud-provider privacy, deletion verification, damaged
-backup repair, cross-version migration, key rotation, secure rollback-floor
+## 8. Operational rotation profile
+
+The V1 activation profile requires at least three byte-verified copies across
+at least two independent failure domains, including one offline or immutable
+copy. A generation is eligible to replace an older one only after:
+
+1. export produced a non-zero receipt and synchronized publication;
+2. at least two independently stored copies match that exact receipt;
+3. one copy, not the exporter's original path, completed a full restore drill;
+4. the protected inventory recorded backup ID, digest, height, lengths, failure
+   domain, copy verification, and drill result; and
+5. at least one previously drilled generation remains until the new generation
+   has satisfied all preceding checks.
+
+The wallet library deliberately has no automatic deletion API. Rotation and
+provider deletion occur only in the operational layer after the inventory proves
+the minimum set remains. A fresh generation and drill are mandatory after a
+schema migration, key rotation, or recovery event. The ordinary time/block
+interval must be frozen with H2 block cadence and operator policy before
+activation; absence of that deployment interval does not weaken the copy and
+drill prerequisites above.
+
+## 9. Remaining recovery gates
+
+This format does not yet provide seed/key recovery, an operational inventory
+store, cloud-provider privacy, provider deletion verification, damaged
+backup repair, migration beyond the implemented schema-1 to schema-2 path, key
+rotation, secure rollback-floor
 updates, user confirmation UX, crash injection at every publication boundary,
-or scheduled restore drills. Those controls and independent review remain
+or executed scheduled restore drills. Those controls and independent review remain
 mandatory before real funds.

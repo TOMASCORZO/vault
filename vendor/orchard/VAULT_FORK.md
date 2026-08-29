@@ -14,6 +14,8 @@ Vault-specific changes are restricted to the circuit-composition API:
 
 - expose the existing Action circuit configuration through a documented
   constructor;
+- expose the existing witness-free Action constructor so a parent circuit can
+  reproduce its keys without first constructing a secret witness;
 - allow one configured Action circuit to bind its public inputs at a caller
   supplied instance-row offset;
 - return typed handles to the already-constrained old/new values and expanded

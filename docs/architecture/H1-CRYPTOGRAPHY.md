@@ -1,8 +1,10 @@
 # H1 Cryptographic Architecture
 
 **Decision status:** Ironwood V3 note/key/encryption suite and hardened Halo2
-Action circuit selected; transfer-v2 codec implemented; Vault accounting and
-burn-encryption circuit not frozen.  
+Action circuit selected; transfer-v2 codec implemented; transparent Halo2
+setup reproduced; Vault accounting and burn-encryption suites vector-locked
+for all 2/4/8/16-Action buckets; H1-C4 aggregate policy frozen and natively
+tested; none independently reviewed or activated.
 **Security status:** production-intent foundation, unaudited and not activated.
 
 ## 1. State model
@@ -42,9 +44,9 @@ commitment/threshold-ElGamal equations. A provisional monolithic circuit now
 links Action note values, private change classification, and derived dummy
 state to that accounting. Validator-side reconstruction binds the activated
 epoch DKG descriptor to `PK_epoch`, while two lossless public limbs bind the
-complete canonical effects digest. It remains fail-closed because the
-signer-side ciphertext policy, vectors, benchmarks, and review gates are not
-complete.
+complete canonical effects digest. Fixed all-bucket real-proof vectors now
+lock that statement, but it remains fail-closed because signer-side hardening,
+benchmarks, independent review, and consensus activation are not complete.
 
 ## 2. Candidate note witness
 
@@ -121,14 +123,26 @@ Vault uses a benchmark gate rather than selecting a proof system by reputation.
 | Candidate | Strength | Principal concern | H1 role |
 |---|---|---|---|
 | Specialized PLONKish/Halo2-style circuit | Small, controllable money-transfer statement | High circuit engineering and audit burden | Production candidate for transfers |
-| Maintained Rust zkVM | General private program execution and fast iteration | Proving cost, proof/version lifecycle, larger attack surface | Reference implementation and contract candidate |
+| Maintained Rust zkVM | General private program execution and fast iteration | Proving cost, proof/version lifecycle, larger attack surface | Isolated reference only; not selected for transfers |
 | Recursive aggregation layer | Amortized validator verification | Added prover complexity and liveness dependency | Required benchmark |
 
 The first RISC Zero 3.0.6 accounting receipt was generated and verified on
 2026-08-21. It was 256,266 bytes and required 175.555 seconds on an 8 GB Apple
 M1 CPU for 262,144 total cycles. This passes the envelope-size experiment but
-fails the current latency bar for direct base-layer transfers. Full methodology
-and omissions are recorded in
+fails the current latency bar for direct base-layer transfers. That
+accounting-only guest is historical and has been superseded by the isolated
+transfer-v2 conformance statement. The replacement decodes canonical effects
+inside the guest and validates membership, ownership and randomized
+authorization, nullifiers, note/value/net openings, exact Ironwood V3 output
+construction, private output classification, gas, exact burn, conservation,
+and the descriptor-bound threshold-ElGamal opening. It exposes no consensus
+adapter and is not selected for transfers. A development-mode-disabled full
+proving attempt was stopped after approximately 2 hours 48 minutes of active
+CPU work without producing a receipt; this is a negative performance result,
+not a cryptographic failure. The selected Halo2 construction retains the real
+proof obligations. The current statement and historical measurement are recorded in
+[`../research/RISC0-TRANSFER-V2-REFERENCE.md`](../research/RISC0-TRANSFER-V2-REFERENCE.md)
+and
 [`../research/RISC0-ACCOUNTING-V1.md`](../research/RISC0-ACCOUNTING-V1.md).
 
 On 2026-08-22 the pinned `PostNu6_3` Halo2 Action circuit generated and verified
@@ -158,13 +172,29 @@ constrains all 256 bits of the effects digest. Its real proof was 9,600 bytes;
 one preliminary run measured 42.224 s for provisional key derivation, 36.099 s
 for proving, and 173 ms for verification. Local signer-side note-ciphertext
 reconstruction, confirmed Noise XX-to-KK pairing, and a channel-bound Noise
-session backed by a crash-consistent Unix replay store are now implemented;
-trusted UX, hardware rollback protection, hardware/multiparty adapters,
-all-bucket vectors, and review gates still prevent assigning a suite ID.
+session backed by a crash-consistent Unix replay store are now implemented.
+H1-C3 assigns distinct vector-locked suite IDs to every 2/4/8/16-Action shape
+and records real positive, anchor-mutation, and proof-mutation cases in
+[`../research/HALO2-TRANSFER-V2-VECTORS.md`](../research/HALO2-TRANSFER-V2-VECTORS.md).
+Those identities are conformance evidence, not consensus activation; trusted
+UX, hardware rollback protection, hardware/multiparty adapters, benchmarks,
+and independent review remain open.
+
+The normative setup record is
+[`HALO2_SETUP_AND_LIFECYCLE.md`](HALO2_SETUP_AND_LIFECYCLE.md). Halo2's Vesta
+IPA parameters are deterministically generated without a ceremony or secret
+contribution. The selected composed-transfer mapping uses `k = 14` for the
+2/4/8-Action buckets and `k = 15` for 16 Actions; `k = 14` cannot synthesize the
+largest bucket. Parameter and VK fingerprints for every bucket are
+reproducible and H1-C3 vector-locks their exact public instances and proof
+encodings. They remain ineligible for activation until review, hardening, and
+later consensus-integration gates pass.
 
 RISC Zero demonstrates a transparent STARK-based RISC-V zkVM and private inputs,
-but its version lifecycle and security advisories show why Vault must pin,
-audit, and support verifier deactivation rather than embed “latest” blindly.
+but its measured proving cost, version lifecycle, and security advisories show
+why Vault does not use this backend for transfers. Any future unrelated use
+would require a separately scoped decision rather than silently embedding
+“latest”.
 
 - [RISC Zero proof-system description](https://dev.risczero.com/proof-system-in-detail.pdf)
 - [RISC Zero security advisories](https://github.com/risc0/risc0/security/advisories)
@@ -184,20 +214,28 @@ Revealing a per-transaction burn reveals the private transfer amount because
 `A` is approximately `200 × burn`. Transfer-v1 therefore exposes a hiding burn
 commitment and a bounded ciphertext, while the proof enforces the burn equation.
 
-The leading design candidate is additively homomorphic encryption to an
-epoch-scoped threshold validator key:
+The selected production-intent H1-C4 policy uses additively homomorphic
+encryption to an epoch-scoped threshold validator key:
 
 1. each transaction proves its ciphertext and commitment encode the same burn;
 2. validators aggregate ciphertexts without individual decryption;
-3. an epoch aggregate is opened only after a minimum anonymity threshold;
-4. a proof links the aggregate opening to the updated public supply statistic;
+3. an epoch aggregate is openable only after 128 unique effects across 16
+   public settlement windows;
+4. valid aggregate-bound DLEQ shares reveal only the group-encoded sum, which a
+   deterministic bounded algorithm recovers under the complete supply cap;
 5. missed threshold shares trigger a defined recovery/liveness path, never a
    bypass of supply conservation.
 
-This design remains open because distributed key generation, validator-set
-rotation, low-volume epochs, and malicious decryption shares add substantial
-risk. Until resolved, exact circulating-supply publication is not a guaranteed
-H1 property; non-inflation remains enforced by transaction proofs.
+Low-volume aggregates carry forward under the same key with no forced-reveal
+timeout, invalid shares cannot poison a valid threshold, and individual
+ciphertexts have no native share-generation path. Exact rules and limitations
+are frozen in
+[`../specs/BURN_AGGREGATION_V1.md`](../specs/BURN_AGGREGATION_V1.md).
+Distributed key generation, validator rotation, finality, share publication,
+aggregate-supply state integration, full-bound performance, and independent
+review remain open. Until H2 resolves the integration items, exact circulating
+supply publication is not guaranteed; non-inflation remains enforced by
+transaction proofs.
 
 ## 6. Network and endpoint privacy
 

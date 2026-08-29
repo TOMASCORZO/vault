@@ -20,6 +20,8 @@ use vault_protocol::{
 
 pub mod accounting;
 pub mod burn_binding;
+pub mod delegated_witness;
+pub mod suite;
 pub mod transfer_circuit;
 
 const COMPOSITE_CIRCUIT_ID_DOMAIN: &str =
@@ -474,5 +476,52 @@ mod tests {
         }
         let action = ActionProof::from_bytes(vec![0; TWO_ACTION_PROOF_BYTES], 2).unwrap();
         assert!(CompositeTransferProof::new(2, ACCOUNTING_SUITE, action, Vec::new()).is_err());
+    }
+
+    #[test]
+    fn composite_codec_structured_malformed_corpus_never_panics_or_extends() {
+        let encoded = encoded_composite();
+
+        for offset in 0..COMPOSITE_HEADER_BYTES {
+            let mut mutated = encoded.clone();
+            mutated[offset] ^= 1_u8 << (offset % 8);
+            assert!(CompositeTransferProof::decode(&mutated, 2, ACCOUNTING_SUITE).is_err());
+        }
+
+        for appended in [1, 2, 31, 256, 4_096] {
+            let mut extended = encoded.clone();
+            extended.resize(encoded.len() + appended, 0xa5);
+            assert!(CompositeTransferProof::decode(&extended, 2, ACCOUNTING_SUITE).is_err());
+        }
+
+        for replacement in [0_u32, 1, u32::MAX] {
+            for field in [71_usize, 75] {
+                let mut mutated = encoded.clone();
+                mutated[field..field + 4].copy_from_slice(&replacement.to_le_bytes());
+                assert!(CompositeTransferProof::decode(&mutated, 2, ACCOUNTING_SUITE).is_err());
+            }
+        }
+
+        let oversized = vec![0; MAX_PROOF_BYTES + 1];
+        assert!(CompositeTransferProof::decode(&oversized, 2, ACCOUNTING_SUITE).is_err());
+
+        let mut state = 0x6a09_e667_f3bc_c909_u64;
+        for _ in 0..2_048 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let length = usize::try_from(state % 16_385).unwrap();
+            let mut bytes = vec![0_u8; length];
+            for byte in &mut bytes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *byte = state as u8;
+            }
+            if let Some(first) = bytes.first_mut() {
+                *first = COMPOSITE_MAGIC[0] ^ 1;
+            }
+            assert!(CompositeTransferProof::decode(&bytes, 2, ACCOUNTING_SUITE).is_err());
+        }
     }
 }

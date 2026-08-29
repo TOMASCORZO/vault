@@ -1,3 +1,11 @@
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
+
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
     note::ExtractedNoteCommitment,
@@ -25,7 +33,9 @@ const ACCOUNTING_SUITE: [u8; 32] = [0xc3; 32];
 const ACCOUNTING_PROOF: [u8; 32] = [0xd4; 32];
 
 #[derive(Debug)]
-struct TestAccountingVerifier;
+struct TestAccountingVerifier {
+    active: Arc<AtomicBool>,
+}
 
 impl AccountingProofVerifier for TestAccountingVerifier {
     fn suite_id(&self) -> [u8; 32] {
@@ -37,7 +47,7 @@ impl AccountingProofVerifier for TestAccountingVerifier {
         _effects: &TransferV2Effects,
         proof: &[u8],
     ) -> Result<(), AccountingProofError> {
-        if proof == ACCOUNTING_PROOF {
+        if self.active.load(Ordering::SeqCst) && proof == ACCOUNTING_PROOF {
             Ok(())
         } else {
             Err(AccountingProofError)
@@ -225,17 +235,27 @@ fn real_two_action_proof_is_canonical_and_fail_closed() {
         ACCOUNTING_PROOF.to_vec(),
     )
     .unwrap();
-    let composite_verifier = CompositeTransferVerifier::new(TestAccountingVerifier);
+    let accounting_active = Arc::new(AtomicBool::new(true));
+    let composite_verifier = CompositeTransferVerifier::new(TestAccountingVerifier {
+        active: Arc::clone(&accounting_active),
+    });
+    let composite_bytes = composite.encode();
     composite_verifier
-        .verify(&composite_effects, &composite.encode())
+        .verify(&composite_effects, &composite_bytes)
         .unwrap();
 
     let rejected_accounting =
-        CompositeTransferProof::new(2, ACCOUNTING_SUITE, proof, vec![0; 32]).unwrap();
+        CompositeTransferProof::new(2, ACCOUNTING_SUITE, proof.clone(), vec![0; 32]).unwrap();
     assert!(
         composite_verifier
             .verify(&composite_effects, &rejected_accounting.encode())
             .is_err()
     );
+
+    accounting_active.store(false, Ordering::SeqCst);
+    assert!(
+        composite_verifier
+            .verify(&composite_effects, &composite_bytes)
+            .is_err()
+    );
 }
-use std::time::Instant;

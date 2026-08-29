@@ -197,17 +197,19 @@ multiplication, `taxable = 200q + r` with `r in [0, 200)`,
 both threshold-ElGamal equations from the same burn cell. The validator now
 checks `scheme_id`, `key_id`, and epoch against the complete activated DKG
 descriptor, reconstructs exact `PK_epoch` coordinates, and supplies the full
-256-bit effects digest as two lossless public limbs constrained by Halo2. It is
-not assigned a suite ID and cannot satisfy a consensus verifier until the
-signer-side note-ciphertext policy, all-bucket vectors, benchmarks, and review
-gates are complete.
+256-bit effects digest as two lossless public limbs constrained by Halo2. H1-C3
+assigns distinct vector-locked suite IDs to the 2/4/8/16-Action shapes and
+publishes real positive and mutation vectors. Those IDs are conformance
+evidence only: no consensus verifier admits them, and activation remains
+blocked on signer, benchmark, independent-review, and later integration gates.
 
 A real two-action proof of the earlier accounting/burn-only shape is 5,504
 bytes. The first monolithic Action/accounting/burn shape was 9,504 bytes; after
 epoch-descriptor reconstruction and full effects-digest binding, the current
-shape is 9,600 bytes and rejects proof-byte, Action-instance, and digest-instance
-mutations. These sizes are engineering evidence only: neither proof is
-consensus-valid and the monolithic shape may still change before review.
+shape is 9,600 bytes for the 2/4/8-Action buckets and 9,664 bytes for 16 Actions.
+Fixed H1-C3 vectors reject an anchor mutation and a proof-byte mutation for
+every bucket. These sizes are engineering evidence only: none of these proofs
+is consensus-valid and the monolithic shape may still change before review.
 
 ## 5. State transition
 
@@ -255,11 +257,15 @@ ID is:
 and all Feldman polynomial coefficient commitments; `burn_epoch` prevents
 accepting a retired key. Ciphertexts aggregate by component-wise point addition.
 The implementation validates keys, encrypts, parses, aggregates, produces and
-verifies Chaum-Pedersen/DLEQ decryption shares, interpolates an exact threshold
-subset, and proves the two per-transfer ciphertext equations against the exact
-descriptor-derived epoch key. DKG, share-publication consensus, bounded
-aggregate discrete-log recovery, rotation, low-volume policy, and activation
-of the final verifier remain blockers.
+verifies aggregate-bound Chaum-Pedersen/DLEQ decryption shares, deterministically
+selects and interpolates a valid threshold subset, performs bounded aggregate
+discrete-log recovery, and proves the two per-transfer ciphertext equations
+against the exact descriptor-derived epoch key. H1-C4 requires at least 128
+unique effects over 16 public settlement windows and carries lower-volume
+aggregates forward without forced reveal. DKG execution, finalized contribution
+admission, share-publication consensus, rotation, public-supply state
+integration, full-bound benchmarks, independent review, and activation remain
+blockers. See [`BURN_AGGREGATION_V1.md`](BURN_AGGREGATION_V1.md).
 
 Arbitrary 64-byte payloads are not valid merely because they parse. For this
 scheme ID the codec requires two canonical Pallas points and non-identity `C1`;
@@ -268,8 +274,8 @@ the committed exact burn. See
 [`../architecture/BURN_ENCRYPTION.md`](../architecture/BURN_ENCRYPTION.md).
 
 Activation requires a governed height containing the exact codec version,
-circuit ID, burn scheme ID, burn key ID, gas schedule, proof-size policy, and
-recent-anchor window. Transfer-v1 MUST NOT acquire v2 meaning and MUST be
+circuit ID, burn scheme ID, burn aggregation policy ID, burn key ID, gas
+schedule, proof-size policy, and recent-anchor window. Transfer-v1 MUST NOT acquire v2 meaning and MUST be
 explicitly disabled before real funds can enter v2 state.
 
 ## 7. Frozen test vector

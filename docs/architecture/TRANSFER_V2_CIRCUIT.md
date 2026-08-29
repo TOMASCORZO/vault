@@ -1,7 +1,8 @@
 # Transfer-v2 specialized circuit
 
-**Status:** production-intent implementation in progress; not activatable  
-**Last updated:** 2026-08-22  
+**Status:** production-intent implementation in progress; transparent setup and
+all-bucket real-proof vectors recorded; not activatable
+**Last updated:** 2026-08-25
 **Code:** `zk/halo2/core`, `zk/halo2/core/src/accounting.rs`,
 `crates/vault-privacy/src/circuit.rs`
 
@@ -32,6 +33,13 @@ rules are recorded in `vendor/orchard/VAULT_FORK.md` and the local review record
 The circuit dependency graph is feature-gated out of the wallet-facing build.
 The isolated `zk/halo2` workspace owns proving and verifying keys, canonical
 proof parsing, and composite proof integration.
+
+The setup is transparent and reproducible: no parameter ceremony or toxic
+waste exists. The composed 2/4/8-Action shapes use `k = 14`; the 16-Action
+shape requires `k = 15` because key generation at `k = 14` fails with
+`NotEnoughRowsAvailable`. Exact parameter and candidate VK fingerprints,
+dependency pins, and lifecycle rules are normative in
+[`HALO2_SETUP_AND_LIFECYCLE.md`](HALO2_SETUP_AND_LIFECYCLE.md).
 
 ## Implemented Action statement
 
@@ -70,6 +78,12 @@ local release run measured:
 These single-run measurements are evidence, not a final benchmark. Normal
 operation must load reviewed persistent keys once rather than derive them per
 transaction.
+
+The bounded H1-A1 harness and current multi-sample local results are recorded
+in [`../research/H1-A1-PROOF-ENGINEERING.md`](../research/H1-A1-PROOF-ENGINEERING.md).
+The pinned Halo2 API does not expose canonical PK/VK serialization, so the
+current harness measures canonical parameter loading plus VK reconstruction and
+does not claim persistent-key startup. H1-A1 remains open.
 
 ## Mandatory second statement
 
@@ -250,8 +264,10 @@ effects-digest binding, measured in one local release run:
 | Proof bytes | 9,600 |
 
 This supersedes the 9,504-byte shape for future development but remains only a
-single engineering measurement. Only the final reviewed circuit may receive a
-suite ID and verifying key.
+single engineering measurement. H1-C3 now vector-locks distinct suite
+IDs for 2/4/8/16 Actions; they remain non-activatable until review and hardening
+gates pass. Exact artifacts are recorded in
+[`../research/HALO2-TRANSFER-V2-VECTORS.md`](../research/HALO2-TRANSFER-V2-VECTORS.md).
 
 ## Fail-closed composition
 
@@ -272,11 +288,11 @@ blocked by the same gate.
   metadata review;
 - implement and review authenticated hardware and multiparty profiles around
   the local independent note-ciphertext validation session;
-- add fixed vectors for action buckets 2, 4, 8, and 16;
 - measure cached-key proving, standalone verification, peak memory, and batch
   verification on target validator hardware;
 - fuzz malformed proof envelopes and native public-instance parsing;
-- reproduce the verifying-key fingerprint and release artifacts in CI;
+- reproduce the vector-locked verifying keys and proofs on independent clean
+  builders and later release artifacts;
 - complete independent circuit, cryptography, and consensus reviews.
 
 No supply, anonymity, or mainnet-safety claim is valid until every gate above

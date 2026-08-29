@@ -161,13 +161,14 @@ prove and enforce:
 12. canonical proof encoding, bounded verification cost, and fail-closed
     activation and deactivation.
 
-The existing `transfer-v1` envelope and accounting-only RISC Zero statement do
-not meet these obligations. The production-intent transfer-v2 codec and real
-Halo2 Action proof are specified in [`../specs/TRANSFER_V2.md`](../specs/TRANSFER_V2.md)
-and [`TRANSFER_V2_CIRCUIT.md`](TRANSFER_V2_CIRCUIT.md). The composite verifier
+The existing `transfer-v1` envelope does not meet these obligations. The
+isolated RISC Zero transfer-v2 oracle now checks them as non-consensus
+conformance evidence, while the production-intent codec and real Halo2 Action
+proof are specified in [`../specs/TRANSFER_V2.md`](../specs/TRANSFER_V2.md) and
+[`TRANSFER_V2_CIRCUIT.md`](TRANSFER_V2_CIRCUIT.md). The composite verifier
 requires a second accounting/burn verifier and ships no permissive
-implementation. Consensus meaning is not changed silently under the v1
-identifier.
+implementation; the zkVM oracle deliberately does not implement that adapter.
+Consensus meaning is not changed silently under the v1 identifier.
 
 ## 6. Network and wallet work required
 
@@ -178,8 +179,11 @@ privacy claims, Vault still needs:
 - transaction diffusion or mix routing with explicit timing and global-passive
   adversary analysis;
 - cover-traffic and low-volume behavior measurements;
-- local proving by default, with an authenticated confidential protocol for any
-  delegated prover;
+- local proving by default; the frozen delegated profile requires explicit
+  per-job opt-in, states that the endpoint learns the complete witness and
+  account full-viewing capability, and locally verifies the returned proof;
+  its dedicated authenticated confidential transport and durable store remain
+  activation work;
 - hardware-backed spending authorization and hardware/keychain custody of
   wallet-database keys plus monotonic rollback state;
 - metadata-minimized logs, crash reports, telemetry, backups, and clipboard
@@ -235,10 +239,11 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   policy-bound transfer-v2 signing session are implemented. Confirmed Noise XX
   pairing, encrypted revocation/rotation state, and the registry-gated KK
   channel bind those checks to an authenticated anti-replay transcript backed
-  by a crash-consistent Unix store. Independent review, keychain and active-session
-  adapters, host-rollback-resistant/non-Unix state, hardware/multiparty adapters,
-  network relays, and complete wallet recovery/durability operations are not
-  implemented.
+  by a crash-consistent Unix store. Registry revocation, rotation, and uncertain
+  persistence now close the affected in-memory sessions. Independent review,
+  keychain adapters, host-rollback-resistant/non-Unix state,
+  hardware/multiparty adapters, network relays, and complete wallet
+  recovery/durability operations are not implemented.
 
 Private smart contracts remain blocked behind completion and independent review
 of the private-transfer path. Contract state will extend this note model only
