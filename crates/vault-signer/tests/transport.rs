@@ -1,17 +1,21 @@
+#[cfg(unix)]
 mod common;
 
-use vault_signer::{
-    MAX_SIGNER_MESSAGE_BYTES, SignerTransport, SignerTransportError, SignerTransportKeyPair,
-    SignerTransportMessageKind,
-};
+use vault_signer::{SignerTransportError, SignerTransportKeyPair};
 
+#[cfg(unix)]
+use vault_signer::{MAX_SIGNER_MESSAGE_BYTES, SignerTransport, SignerTransportMessageKind};
+
+#[cfg(unix)]
 const NETWORK: [u8; 32] = [0x31; 32];
 
+#[cfg(unix)]
 fn paired_transport() -> (SignerTransport, SignerTransport) {
     common::paired_transport([0x91; 32], NETWORK)
 }
 
 #[test]
+#[cfg(unix)]
 fn paired_noise_channel_is_mutually_authenticated_and_bound() {
     let (mut initiator, mut responder) = paired_transport();
     assert_eq!(initiator.channel_binding(), responder.channel_binding());
@@ -37,6 +41,7 @@ fn paired_noise_channel_is_mutually_authenticated_and_bound() {
 }
 
 #[test]
+#[cfg(unix)]
 fn transport_replay_reordering_and_tampering_poison_the_channel() {
     let (mut sender, mut receiver) = paired_transport();
     let first = sender
@@ -80,6 +85,7 @@ fn transport_replay_reordering_and_tampering_poison_the_channel() {
 }
 
 #[test]
+#[cfg(unix)]
 fn exact_resource_bound_is_enforced() {
     let (mut sender, mut receiver) = paired_transport();
     let payload = vec![0x5a; MAX_SIGNER_MESSAGE_BYTES];

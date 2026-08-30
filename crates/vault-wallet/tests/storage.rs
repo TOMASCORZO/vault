@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::{fs, path::Path};
 
 #[cfg(unix)]
@@ -15,10 +17,14 @@ use vault_protocol::{
     FinalizedCompactBlockHeader, TransactionId,
 };
 use vault_wallet::{
-    EncryptedWalletDb, FinalizedWalletStore, WalletAccountId, WalletBirthdayCheckpoint,
-    WalletDatabaseConfig, WalletDbError, WalletRecoveryAccounts, WalletRecoveryError,
-    WalletRecoveryPlan, WalletRecoveryStatus, WalletScanAccount, WalletScanError, WalletScanTip,
-    scan_finalized_block,
+    EncryptedWalletDb, FinalizedWalletStore, WalletAccountId, WalletDatabaseConfig, WalletDbError,
+    WalletScanAccount, WalletScanTip, scan_finalized_block,
+};
+
+#[cfg(unix)]
+use vault_wallet::{
+    WalletBirthdayCheckpoint, WalletRecoveryAccounts, WalletRecoveryError, WalletRecoveryPlan,
+    WalletRecoveryStatus, WalletScanError,
 };
 
 const NETWORK: [u8; 32] = [0x41; 32];

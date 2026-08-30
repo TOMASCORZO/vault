@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::{fs, path::Path};
 
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};

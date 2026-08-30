@@ -26,6 +26,10 @@ decision evidence and never count as deployable features.
 
 **Goal:** prove the H0 invariants without exposing owners or amounts.
 
+Remaining work is classified and bounded by the
+[`H1 finite closure matrix`](H1_CLOSURE_MATRIX.md). H2 consensus integration and
+later milestones do not expand H1 cryptographic implementation.
+
 - [x] Add typed note commitments, nullifiers, state anchors, and circuit IDs.
 - [x] Add fail-closed proof-verifier integration and transaction domain separation.
 - [x] Add pre-verification limits for proof, ciphertext, inputs, and outputs.
@@ -93,7 +97,8 @@ decision evidence and never count as deployable features.
   consensus-verified header source boundary, hostile compact-byte decoding,
   one-height durable commits, partial-success accounting, and exact reopen/resume.
 - [ ] Complete approved seed custody/import, trusted birthday and target
-  checkpoint distribution, a real validating full-node/light-client adapter,
+  checkpoint distribution (the real validating full-node/light-client adapter
+  is H2 and consumes the fail-closed H1 boundary),
   private/padded retrieval, product incomplete-recovery UX, backup rotation and restore drills,
   versioned migrations, checkpoint pruning/compaction and long-history growth,
   keychain/secure-element key plus rollback state, multi-platform stores,
@@ -123,7 +128,9 @@ decision evidence and never count as deployable features.
 - [ ] Activate a verifier only after all proof, wallet, vector, benchmark, and
   independent-review gates pass.
 - [ ] Benchmark at least two maintained proof-system implementations.
-- Define trusted-setup assumptions, if any.
+- [x] Define proof parameter and trusted-setup assumptions for both backends;
+  both use transparent parameter generation, while reproducible artifact and
+  activation evidence remains gated by the H1 closure matrix.
 - [x] Publish the first deterministic envelope transcript vector.
 - [ ] Publish real-proof positive and negative test vectors for both backends.
 - Design epoch burn aggregation and low-volume privacy handling.

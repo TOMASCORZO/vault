@@ -436,9 +436,33 @@ impl OutputAuthorizationPacket {
             action_nullifier: self.action_nullifier,
             output: self.output.clone(),
             kind: self.kind,
+            recipient: self.recipient,
+            value: self.value,
             packet_digest: self.transport_digest(),
             signer_fingerprint: signer_fingerprint(full_viewing_key),
         })
+    }
+
+    /// Reconstructs every encrypted output field for an isolated reference
+    /// proof statement. Unlike signer policy, this does not claim that a user
+    /// approved an intent; it only proves that the private opening exactly
+    /// matches the public output under the supplied viewing key.
+    pub fn verify_reference(
+        &self,
+        full_viewing_key: &VaultFullViewingKey,
+        expected_output: &EncryptedNote,
+        maximum_value: u64,
+    ) -> Result<VerifiedOutputAuthorization, OutputAuthorizationError> {
+        let intent = OutputAuthorizationIntent::new(
+            self.network_id,
+            self.sender_scope,
+            self.kind,
+            self.recipient,
+            self.value,
+            self.action_nullifier,
+            *self.memo,
+        )?;
+        self.verify(full_viewing_key, &intent, expected_output, maximum_value)
     }
 
     /// Domain-separated digest used only to bind this secret packet into an
@@ -459,6 +483,8 @@ pub struct VerifiedOutputAuthorization {
     action_nullifier: ActionNullifier,
     output: EncryptedNote,
     kind: OutputKind,
+    recipient: VaultAddress,
+    value: u64,
     packet_digest: [u8; 32],
     signer_fingerprint: [u8; 32],
 }
@@ -475,6 +501,8 @@ impl fmt::Debug for VerifiedOutputAuthorization {
 
 impl Drop for VerifiedOutputAuthorization {
     fn drop(&mut self) {
+        self.recipient.0.zeroize();
+        self.value.zeroize();
         self.signer_fingerprint.zeroize();
     }
 }
@@ -490,6 +518,24 @@ impl VerifiedOutputAuthorization {
     #[must_use]
     pub const fn kind(&self) -> OutputKind {
         self.kind
+    }
+
+    /// Reconstructed private receiver used to classify exact paired change.
+    #[must_use]
+    pub const fn recipient(&self) -> VaultAddress {
+        self.recipient
+    }
+
+    /// Reconstructed private output value.
+    #[must_use]
+    pub const fn value(&self) -> u64 {
+        self.value
+    }
+
+    /// Public nullifier reused as the created note's unique `rho`.
+    #[must_use]
+    pub const fn action_nullifier(&self) -> ActionNullifier {
+        self.action_nullifier
     }
 
     /// Whether this token covers the exact canonical action output.

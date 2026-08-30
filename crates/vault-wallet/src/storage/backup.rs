@@ -1,11 +1,14 @@
 //! Streaming authenticated backup container for the encrypted wallet database.
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{ErrorKind, Read, Write},
     path::Path,
     time::Duration,
 };
+
+#[cfg(unix)]
+use std::fs::OpenOptions;
 
 use blake3::Hasher;
 use chacha20poly1305::{

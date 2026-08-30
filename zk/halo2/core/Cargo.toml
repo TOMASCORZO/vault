@@ -23,6 +23,7 @@ zeroize.workspace = true
 [dev-dependencies]
 incrementalmerkletree.workspace = true
 rand_chacha = "0.3.1"
+vault-zk-accounting-core = { path = "../../risc0/core" }
 
 [lints]
 workspace = true

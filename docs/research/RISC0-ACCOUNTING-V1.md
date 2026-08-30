@@ -98,6 +98,47 @@ The most important current attack is burn evasion by labelling a recipient
 output as change. The production statement must derive internal change from an
 authenticated spender key rather than trusting this classification.
 
+## Transfer-v2 reference statement
+
+On 2026-08-29 the isolated core added a versioned `TransferV2` reference claim.
+It parses the exact canonical `TransferV2Effects` with the production codec and
+reconstructs every private action from a validated Orchard FVK, private note,
+depth-32 membership path, Action randomizer, net-value trapdoor, and fixed signer
+output packet. It verifies ownership, membership for non-zero inputs, nullifier
+derivation, `ak + alpha`, the public net commitment, note/value commitments,
+ephemeral key, recipient ciphertext, sender-recovery ciphertext, and public
+output `rho`. Payment/change/dummy classification is derived from the exact
+opened input and output receivers; no standalone classification bit is accepted.
+
+The same hidden taxable sum funds checked conservation and ceiling 0.5% burn.
+The guest reconstructs the epoch DKG key ID, burn commitment, and both
+threshold-ElGamal ciphertext equations from private openings. The journal
+contains only the canonical effects digest, public action count, and public gas
+fee; it does not disclose the taxable sum or burn. Ten native tests cover the
+positive statement and negative membership, ownership, nullifier,
+authorization, note/output, classification, commitment, ciphertext, burn,
+epoch, gas, and conservation boundaries. Positive and burn-evasion fixtures
+feed the same exact witness to the transparent reference statement and the
+Halo2 monolithic circuit; both accept the positive vector and reject the evasion
+vector.
+
+The versioned guest entry point now distinguishes `AccountingV1` from
+`TransferV2`, preventing silent reinterpretation of old host input. This changes
+the guest image and therefore requires a newly reviewed image ID and real
+receipt before the v2 increment has proof evidence.
+
+### Windows reproduction status
+
+The 2026-08-29 Ryzen/Windows run completed core tests, Clippy with warnings
+denied, rustdoc, root gates, and the differential Halo2 vectors. Full
+guest/workspace compilation under RISC Zero 3.0.6 still does not complete on
+MSVC: upstream native circuit crates invoke generated C++20 constructs with
+`/std:c++17`, and the methods build script encounters an unresolved zkVM
+platform allocation symbol. No local security or verifier patch was introduced.
+WSL 2.7.1 and Ubuntu were installed/requested after enabling both Windows
+features; Windows requires one final restart before the Linux guest-image and
+real-receipt gate can run.
+
 ## Reproduction
 
 RISC Zero components are pinned independently:

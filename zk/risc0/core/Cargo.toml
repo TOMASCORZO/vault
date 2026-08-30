@@ -8,6 +8,15 @@ license.workspace = true
 [dependencies]
 blake3.workspace = true
 serde.workspace = true
+vault-burn = { path = "../../../crates/vault-burn" }
+vault-privacy = { path = "../../../crates/vault-privacy" }
+vault-protocol = { path = "../../../crates/vault-protocol" }
+
+[dev-dependencies]
+incrementalmerkletree = "=0.8.2"
+orchard = { version = "=0.15.5", path = "../../../vendor/orchard", default-features = false, features = ["std"] }
+pasta_curves = "=0.5.2"
+rand_chacha = "0.3.1"
 
 [lints]
 workspace = true

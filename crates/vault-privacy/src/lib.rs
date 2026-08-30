@@ -493,6 +493,56 @@ impl CanonicalValueCommitment {
     pub fn is_identity(self) -> bool {
         self.0 == pallas::Point::identity().to_bytes()
     }
+
+    /// Reconstructs the exact Orchard commitment to `input - output` from a
+    /// private transfer witness. This is shared by transparent reference
+    /// backends so they check the same opening as the Action circuit.
+    pub fn derive_net_opening(
+        input: u64,
+        output: u64,
+        trapdoor: [u8; 32],
+    ) -> Result<Self, PrivacyError> {
+        if trapdoor == [0; 32] {
+            return Err(PrivacyError::InvalidCircuitWitness);
+        }
+        let trapdoor =
+            Option::<ValueCommitTrapdoor>::from(ValueCommitTrapdoor::from_bytes(trapdoor))
+                .ok_or(PrivacyError::InvalidCircuitWitness)?;
+        Self::from_bytes(
+            ValueCommitment::derive(
+                NoteValue::from_raw(input) - NoteValue::from_raw(output),
+                trapdoor,
+            )
+            .to_bytes(),
+        )
+    }
+
+    /// Reconstructs the circuit-compatible commitment to one bounded burn.
+    /// The trapdoor must use the same base-field subset required by the Halo2
+    /// burn-binding gadget.
+    pub fn derive_burn_opening(
+        amount: u64,
+        maximum_amount: u64,
+        trapdoor: [u8; 32],
+    ) -> Result<Self, PrivacyError> {
+        if amount > maximum_amount
+            || trapdoor == [0; 32]
+            || Option::<pallas::Base>::from(pallas::Base::from_repr(trapdoor)).is_none()
+        {
+            return Err(PrivacyError::InvalidCircuitWitness);
+        }
+        let trapdoor =
+            Option::<ValueCommitTrapdoor>::from(ValueCommitTrapdoor::from_bytes(trapdoor))
+                .ok_or(PrivacyError::InvalidCircuitWitness)?;
+        let commitment = Self::from_bytes(
+            ValueCommitment::derive(NoteValue::from_raw(amount) - NoteValue::ZERO, trapdoor)
+                .to_bytes(),
+        )?;
+        if commitment.is_identity() {
+            return Err(PrivacyError::InvalidCircuitWitness);
+        }
+        Ok(commitment)
+    }
 }
 
 /// Full viewing capability. It can detect incoming and outgoing notes and
@@ -550,6 +600,32 @@ impl VaultFullViewingKey {
         let note = note.orchard()?;
         let nullifier = note.nullifier(&self.orchard()).to_bytes();
         ActionNullifier::from_bytes(nullifier)
+    }
+
+    /// Returns whether an exact diversified receiver belongs to either scope
+    /// of this viewing key. Reference proof backends use this to enforce input
+    /// note ownership before accepting a derived nullifier.
+    #[must_use]
+    pub fn owns_address(&self, address: VaultAddress) -> bool {
+        self.orchard()
+            .scope_for_address(&address.orchard())
+            .is_some()
+    }
+
+    /// Derives the public randomized spend-validating key from the viewing
+    /// key's `ak` and the private Action randomizer.
+    pub fn randomized_spend_validating_key(
+        &self,
+        randomizer: [u8; 32],
+    ) -> Result<RandomizedSpendValidatingKey, PrivacyError> {
+        let randomizer = parse_nonzero_scalar(&randomizer)?;
+        let encoded = self.export();
+        let authorizing_key: [u8; 32] = encoded[..32]
+            .try_into()
+            .map_err(|_| PrivacyError::InvalidFullViewingKey)?;
+        let authorizing_key = redpallas::VerificationKey::<SpendAuth>::try_from(authorizing_key)
+            .map_err(|_| PrivacyError::InvalidFullViewingKey)?;
+        RandomizedSpendValidatingKey::from_bytes((&authorizing_key.randomize(&randomizer)).into())
     }
 
     fn orchard(&self) -> FullViewingKey {

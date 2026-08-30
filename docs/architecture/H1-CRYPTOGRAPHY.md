@@ -178,6 +178,10 @@ No proof backend is activated in consensus until it passes:
 - memory, latency, and proof-size benchmarks;
 - independent cryptography review.
 
+Both selected backends use transparent parameter generation rather than a
+secret structured setup. Exact assumptions, artifact integrity requirements,
+and suite rotation rules are specified in [`PROOF_SETUP.md`](PROOF_SETUP.md).
+
 ## 5. Burn aggregation
 
 Revealing a per-transaction burn reveals the private transfer amount because

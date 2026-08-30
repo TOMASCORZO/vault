@@ -1089,6 +1089,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vault-zk-accounting-core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "vault-burn",
+ "vault-privacy",
+ "vault-protocol",
+]
+
+[[package]]
 name = "vault-zk-halo2-core"
 version = "0.1.0"
 dependencies = [
@@ -1105,6 +1116,7 @@ dependencies = [
  "vault-burn",
  "vault-privacy",
  "vault-protocol",
+ "vault-zk-accounting-core",
  "zeroize",
 ]
 

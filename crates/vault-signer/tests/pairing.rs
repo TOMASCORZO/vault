@@ -1,12 +1,18 @@
 use core::str::FromStr;
 
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+#[cfg(unix)]
 use tempfile::tempdir;
 use vault_signer::{
+    PairedSignerRecord, PairingFingerprint, SignerPairingError, SignerPairingHandshake,
+    SignerTransportKeyPair,
+};
+
+#[cfg(unix)]
+use vault_signer::{
     ENCRYPTED_PEER_REGISTRY_BYTES, EncryptedPeerRegistry, PAIRED_SIGNER_RECORD_BYTES,
-    PairedSignerRecord, PairingFingerprint, PeerRegistryError, PeerRegistryId, PeerRegistryScope,
-    PeerRegistryStorageKey, SignerPairingError, SignerPairingHandshake, SignerPairingRole,
-    SignerTransportKeyPair, SignerTransportMessageKind,
+    PeerRegistryError, PeerRegistryId, PeerRegistryScope, PeerRegistryStorageKey,
+    SignerPairingRole, SignerTransportMessageKind,
 };
 
 const NETWORK: [u8; 32] = [0x31; 32];
@@ -59,6 +65,7 @@ fn xx_pairing_requires_matching_out_of_band_confirmation() {
 }
 
 #[test]
+#[cfg(unix)]
 fn confirmed_records_round_trip_and_open_the_paired_kk_channel() {
     let mut rng = ChaCha20Rng::from_seed([0x72; 32]);
     let coordinator_key = SignerTransportKeyPair::generate(&mut rng);
@@ -157,6 +164,7 @@ fn confirmed_records_round_trip_and_open_the_paired_kk_channel() {
 }
 
 #[test]
+#[cfg(unix)]
 fn wrong_network_tampering_and_wrong_local_key_fail_closed() {
     let mut rng = ChaCha20Rng::from_seed([0x73; 32]);
     let coordinator_key = SignerTransportKeyPair::generate(&mut rng);

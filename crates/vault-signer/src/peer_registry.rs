@@ -950,7 +950,9 @@ fn map_durable_error(error: DurableFileError) -> PeerRegistryError {
         #[cfg(not(unix))]
         DurableFileError::UnsupportedPlatform => PeerRegistryError::UnsupportedPlatform,
         DurableFileError::InvalidPath => PeerRegistryError::InvalidPath,
+        #[cfg(unix)]
         DurableFileError::LockContended => PeerRegistryError::LockContended,
+        #[cfg(unix)]
         DurableFileError::CorruptFile => PeerRegistryError::InvalidStore,
         DurableFileError::IoFailure => PeerRegistryError::IoFailure,
     }

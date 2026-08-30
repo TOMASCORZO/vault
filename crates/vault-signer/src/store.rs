@@ -362,7 +362,9 @@ fn map_durable_error(error: DurableFileError) -> ReplayStoreError {
         #[cfg(not(unix))]
         DurableFileError::UnsupportedPlatform => ReplayStoreError::UnsupportedPlatform,
         DurableFileError::InvalidPath => ReplayStoreError::InvalidPath,
+        #[cfg(unix)]
         DurableFileError::LockContended => ReplayStoreError::LockContended,
+        #[cfg(unix)]
         DurableFileError::CorruptFile => ReplayStoreError::CorruptState,
         DurableFileError::IoFailure => ReplayStoreError::IoFailure,
     }

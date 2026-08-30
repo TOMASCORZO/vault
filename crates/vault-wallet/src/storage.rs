@@ -14,8 +14,7 @@ pub use backup::WalletBackupSummary;
 use core::fmt;
 use std::{
     collections::BTreeSet,
-    fs::{self, File, OpenOptions},
-    io::ErrorKind,
+    fs::File,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -26,6 +25,7 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload},
 };
+#[cfg(unix)]
 use fs2::FileExt;
 use incrementalmerkletree::{Address, Level, Marking, Position, Retention, frontier::Frontier};
 use orchard::tree::MerkleHashOrchard;
@@ -36,6 +36,11 @@ use rusqlite::{
 use shardtree::{
     LocatedPrunableTree, Node, PrunableTree, RetentionFlags, ShardTree, Tree,
     store::{Checkpoint, ShardStore, TreeState},
+};
+#[cfg(unix)]
+use std::{
+    fs::{self, OpenOptions},
+    io::ErrorKind,
 };
 use vault_privacy::{
     ActionNullifier, DECRYPTED_NOTE_BYTES, DecryptedNote, KeyScope, NOTE_TREE_DEPTH,

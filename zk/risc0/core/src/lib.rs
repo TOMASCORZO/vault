@@ -1,11 +1,16 @@
 //! Shared, deterministic statement for Vault's experimental RISC Zero backend.
 //!
-//! This statement proves private accounting only. It does **not** yet prove
-//! note-tree membership, spend authorization, nullifier derivation, individual
-//! output-note openings, or ciphertext correctness.
+//! The legacy `AccountingV1` statement proves private accounting only. The
+//! versioned `TransferV2` statement additionally reconstructs the production
+//! Ironwood/Orchard and burn-encryption relations required by C1. Neither
+//! statement is activated for consensus by this crate.
 
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
+
+pub mod transfer_v2;
+
+use transfer_v2::{TransferV2ReferenceClaim, TransferV2ReferenceJournal};
 
 const PUBLIC_INPUT_DOMAIN: &str = "vault.protocol.transfer-v1.public-inputs.2026-08-21";
 const BALANCE_DOMAIN: &str = "vault.zk.risc0.accounting-v1.balance.2026-08-21";
@@ -126,6 +131,51 @@ pub struct AccountingJournal {
     pub output_count: u16,
     /// Public gas fee proven to be funded by the private inputs.
     pub gas_fee: u128,
+}
+
+/// Versioned guest input. New statements must be explicit variants so an old
+/// host cannot be silently reinterpreted under a changed circuit.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ReferenceClaim {
+    /// Legacy accounting-only transfer-v1 research statement.
+    AccountingV1(Box<AccountingClaim>),
+    /// First bounded transfer-v2 reference-statement increment.
+    TransferV2(Box<TransferV2ReferenceClaim>),
+}
+
+/// Versioned authenticated guest journal.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ReferenceJournal {
+    /// Result of the legacy accounting-only transfer-v1 statement.
+    AccountingV1(AccountingJournal),
+    /// Result of the first transfer-v2 reference-statement increment.
+    TransferV2(TransferV2ReferenceJournal),
+}
+
+impl ReferenceClaim {
+    /// Validates exactly the selected statement and preserves its version in
+    /// the authenticated journal.
+    pub fn validate(&self) -> Result<ReferenceJournal, ReferenceError> {
+        match self {
+            Self::AccountingV1(claim) => claim
+                .validate()
+                .map(ReferenceJournal::AccountingV1)
+                .map_err(ReferenceError::AccountingV1),
+            Self::TransferV2(claim) => claim
+                .validate()
+                .map(ReferenceJournal::TransferV2)
+                .map_err(ReferenceError::TransferV2),
+        }
+    }
+}
+
+/// Versioned guest rejection without erasing which statement failed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReferenceError {
+    /// Legacy accounting-v1 validation failed.
+    AccountingV1(AccountingError),
+    /// Transfer-v2 reference validation failed.
+    TransferV2(transfer_v2::TransferV2ReferenceError),
 }
 
 /// Deterministic rejection reasons shared by native tests and the zkVM guest.

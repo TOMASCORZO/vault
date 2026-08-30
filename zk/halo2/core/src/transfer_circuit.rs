@@ -597,6 +597,9 @@ mod tests {
     use vault_protocol::{
         ChainId, CircuitId, EncryptedBurnV2, GasParameters, TransferV2Action, TransferV2Effects,
     };
+    use vault_zk_accounting_core::transfer_v2::{
+        TransferV2ActionWitness, TransferV2BurnWitness, TransferV2ReferenceClaim,
+    };
 
     use super::*;
     use crate::{
@@ -653,6 +656,7 @@ mod tests {
         prepared: PreparedVaultTransfer<2>,
         effects: TransferV2Effects,
         epoch_key: EpochBurnPublicKey,
+        reference: TransferV2ReferenceClaim,
     }
 
     fn fixture(mode: FixtureMode) -> Fixture {
@@ -662,7 +666,7 @@ mod tests {
     fn fixture_result(mode: FixtureMode) -> Result<Fixture, VaultTransferPreparationError> {
         let spending_key = VaultSpendingKey::derive(&[0xA5; 32], NETWORK, 0).unwrap();
         let full_viewing_key = spending_key.full_viewing_key();
-        let input_address = full_viewing_key.address_at(0, KeyScope::External);
+        let input_address = full_viewing_key.address_at(0, KeyScope::Internal);
         let external_recipient = VaultSpendingKey::derive(&[0xB6; 32], NETWORK, 0)
             .unwrap()
             .full_viewing_key()
@@ -754,6 +758,23 @@ mod tests {
                 net_value.commitment(),
                 output.encrypted_note().clone(),
             );
+            let kind = if output_values[index] == 0 {
+                vault_privacy::OutputKind::Dummy
+            } else if recipients[index] == input_address {
+                vault_privacy::OutputKind::InternalChange
+            } else {
+                vault_privacy::OutputKind::ExternalPayment
+            };
+            let output_packet = output.authorization_packet(NETWORK, kind).unwrap();
+            let reference = TransferV2ActionWitness {
+                full_viewing_key: full_viewing_key.export().to_vec(),
+                input_note: inputs[index].encode_private().to_vec(),
+                membership_position: paths[index].position(),
+                membership_auth_path: paths[index].auth_path().to_vec(),
+                output_authorization_packet: output_packet.encode().to_vec(),
+                authorization_randomizer: *authorization.randomizer(),
+                net_value_commitment_trapdoor: *net_value.trapdoor(),
+            };
             prepared.push((
                 action_nullifier,
                 circuit,
@@ -763,17 +784,22 @@ mod tests {
                     output_values[index],
                     taxable[index],
                 ),
+                reference,
             ));
         }
-        prepared.sort_by_key(|(action_nullifier, _, _, _)| *action_nullifier);
+        prepared.sort_by_key(|(action_nullifier, _, _, _, _)| *action_nullifier);
 
         let mut circuits = Vec::with_capacity(2);
         let mut public_actions = Vec::with_capacity(2);
+        let mut reference_actions = Vec::with_capacity(2);
         let mut accounting_actions = [AccountingActionWitness::dummy(); 2];
-        for (index, (_, circuit, public_action, accounting)) in prepared.into_iter().enumerate() {
+        for (index, (_, circuit, public_action, accounting, reference)) in
+            prepared.into_iter().enumerate()
+        {
             circuits.push(circuit);
             public_actions.push(public_action);
             accounting_actions[index] = accounting;
+            reference_actions.push(reference);
         }
         let arithmetic =
             PreparedAccountingArithmetic::new(accounting_actions, GAS_UNITS, FEE_PER_GAS).unwrap();
@@ -829,6 +855,18 @@ mod tests {
             public_actions,
         )
         .unwrap();
+        let reference = TransferV2ReferenceClaim {
+            canonical_effects: effects.encode_canonical(),
+            actions: reference_actions,
+            burn: TransferV2BurnWitness {
+                epoch: epoch_key.epoch(),
+                threshold: epoch_key.threshold(),
+                participants: epoch_key.participants().to_vec(),
+                coefficient_commitments: commitments.to_vec(),
+                commitment_trapdoor: *commitment.trapdoor(),
+                encryption_randomness: *ciphertext.randomness(),
+            },
+        };
 
         // Shifted private values deliberately preserve the exact public
         // transcript. Only the in-circuit equality between the hardened Action
@@ -839,6 +877,7 @@ mod tests {
             prepared,
             effects,
             epoch_key,
+            reference,
         })
     }
 
@@ -875,6 +914,7 @@ mod tests {
             prepared,
             effects,
             epoch_key,
+            ..
         } = fixture(FixtureMode::Valid);
         let canonical = VaultTransferPublicInputs::<2>::from_effects(&effects, &epoch_key).unwrap();
         assert_eq!(canonical.to_columns(), prepared.public_inputs());
@@ -952,6 +992,7 @@ mod tests {
             prepared,
             effects,
             epoch_key,
+            ..
         } = fixture(FixtureMode::Valid);
         let mut rng = ChaCha20Rng::from_seed([0xD1; 32]);
         let replacement = PreparedBurnCiphertext::encrypt(
@@ -987,6 +1028,7 @@ mod tests {
             prepared,
             effects,
             epoch_key,
+            ..
         } = fixture(FixtureMode::Valid);
         let original_inputs = VaultTransferPublicInputs::<2>::from_effects(&effects, &epoch_key)
             .unwrap()
@@ -1086,6 +1128,46 @@ mod tests {
         )
         .unwrap()
         .assert_satisfied();
+    }
+
+    #[test]
+    fn transparent_reference_and_halo2_accept_the_same_exact_witness() {
+        let fixture = fixture(FixtureMode::Valid);
+        let reference_journal = fixture.reference.validate().unwrap();
+        assert_eq!(
+            reference_journal.public_inputs_digest,
+            *fixture.effects.public_inputs_digest().as_bytes()
+        );
+        assert_eq!(reference_journal.action_count, 2);
+        assert_eq!(
+            reference_journal.gas_fee,
+            u128::from(GAS_UNITS * FEE_PER_GAS)
+        );
+
+        halo2_proofs::dev::MockProver::run(
+            VAULT_TRANSFER_K,
+            &fixture.prepared.circuit(),
+            fixture.prepared.public_inputs(),
+        )
+        .unwrap()
+        .assert_satisfied();
+    }
+
+    #[test]
+    fn transparent_reference_and_halo2_both_reject_burn_evasion_vector() {
+        let fixture = fixture(FixtureMode::ExternalOutputClaimedAsChange);
+        assert_eq!(
+            fixture.reference.validate(),
+            Err(vault_zk_accounting_core::transfer_v2::TransferV2ReferenceError::ConservationFailure)
+        );
+
+        let prover = halo2_proofs::dev::MockProver::run(
+            VAULT_TRANSFER_K,
+            &fixture.prepared.circuit(),
+            fixture.prepared.public_inputs(),
+        )
+        .unwrap();
+        assert!(prover.verify().is_err());
     }
 
     #[test]

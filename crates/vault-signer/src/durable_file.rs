@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    fs::{self, File},
+    fs::File,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -11,7 +11,7 @@ use tempfile::NamedTempFile;
 use fs2::FileExt;
 #[cfg(unix)]
 use std::{
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{self, Read},
 };
 
@@ -20,7 +20,9 @@ pub(crate) enum DurableFileError {
     #[cfg(not(unix))]
     UnsupportedPlatform,
     InvalidPath,
+    #[cfg(unix)]
     LockContended,
+    #[cfg(unix)]
     CorruptFile,
     IoFailure,
 }

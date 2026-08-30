@@ -11,16 +11,18 @@ use vault_protocol::{
     CircuitId, ProofVerificationError, PublicInputDigest, ShieldedTransfer, TransferProofVerifier,
 };
 use vault_zk_accounting_core::{
-    AccountingClaim, AccountingJournal, PublicBurn, PublicOutput, TransferPublicFields,
+    AccountingClaim, AccountingJournal, PublicBurn, PublicOutput, ReferenceClaim, ReferenceJournal,
+    TransferPublicFields, transfer_v2::TransferV2ReferenceClaim,
 };
 use vault_zk_accounting_methods::{VAULT_ZK_ACCOUNTING_GUEST_ELF, VAULT_ZK_ACCOUNTING_GUEST_ID};
 
-/// Reviewed guest image ID for the post-remediation accounting-v1 build.
+/// Reviewed guest image ID for the versioned accounting-v1/transfer-v2 build.
 ///
-/// CI deliberately fails if the compiled guest no longer produces these bytes.
-pub const REVIEWED_ACCOUNTING_V1_CIRCUIT_ID: [u8; 32] = [
-    203, 198, 46, 206, 178, 141, 54, 213, 107, 153, 116, 228, 70, 98, 91, 222, 230, 165, 188,
-    144, 219, 168, 115, 190, 60, 241, 106, 73, 194, 142, 20, 217,
+/// Two clean Linux regenerations produced these exact bytes. CI deliberately
+/// fails if the compiled guest changes without another explicit review.
+pub const REVIEWED_REFERENCE_GUEST_ID: [u8; 32] = [
+    203, 149, 6, 155, 245, 13, 55, 163, 230, 169, 240, 253, 21, 25, 165, 103, 109, 99, 76, 40, 198,
+    245, 165, 154, 51, 85, 17, 66, 124, 173, 208, 50,
 ];
 
 /// Proof-generation measurements captured on the local machine.
@@ -46,6 +48,17 @@ pub struct ProofArtifact {
     /// Journal authenticated by the receipt.
     pub journal: AccountingJournal,
     /// Local proving measurements.
+    pub metrics: ProvingMetrics,
+}
+
+/// A real transfer-v2 reference receipt plus its authenticated journal and metrics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferV2ProofArtifact {
+    /// Bincode-encoded cryptographic RISC Zero receipt.
+    pub proof: Vec<u8>,
+    /// Minimal transfer-v2 journal authenticated by the receipt.
+    pub journal: vault_zk_accounting_core::transfer_v2::TransferV2ReferenceJournal,
+    /// Local proof-generation measurements.
     pub metrics: ProvingMetrics,
 }
 
@@ -122,8 +135,10 @@ pub fn public_fields(transfer: &ShieldedTransfer) -> TransferPublicFields {
 /// Generates and immediately verifies one real accounting receipt.
 pub fn prove(claim: &AccountingClaim) -> Result<ProofArtifact, ZkBackendError> {
     reject_development_mode()?;
+    let expected_digest = claim.public.public_inputs_digest();
+    let claim = ReferenceClaim::AccountingV1(Box::new(claim.clone()));
     let env = ExecutorEnv::builder()
-        .write(claim)
+        .write(&claim)
         .map_err(|error| ZkBackendError::Environment(error.to_string()))?
         .build()
         .map_err(|error| ZkBackendError::Environment(error.to_string()))?;
@@ -138,12 +153,16 @@ pub fn prove(claim: &AccountingClaim) -> Result<ProofArtifact, ZkBackendError> {
         .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
         .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
 
-    let journal: AccountingJournal = prove_info
+    let journal: ReferenceJournal = prove_info
         .receipt
         .journal
         .decode()
         .map_err(|error| ZkBackendError::JournalDecoding(error.to_string()))?;
-    let expected_digest = claim.public.public_inputs_digest();
+    let ReferenceJournal::AccountingV1(journal) = journal else {
+        return Err(ZkBackendError::JournalDecoding(
+            "guest returned the wrong statement version".to_owned(),
+        ));
+    };
     if journal.public_inputs_digest != expected_digest {
         return Err(ZkBackendError::PublicInputMismatch);
     }
@@ -165,6 +184,65 @@ pub fn prove(claim: &AccountingClaim) -> Result<ProofArtifact, ZkBackendError> {
     })
 }
 
+/// Generates and immediately verifies one real transfer-v2 reference receipt.
+///
+/// This API is deliberately not wired into `TransferV2ProofVerifier`; C1
+/// evidence must not activate a still-unaudited backend.
+pub fn prove_transfer_v2(
+    claim: &TransferV2ReferenceClaim,
+) -> Result<TransferV2ProofArtifact, ZkBackendError> {
+    reject_development_mode()?;
+    let expected_digest =
+        vault_protocol::TransferV2Effects::decode_canonical(&claim.canonical_effects)
+            .map_err(|error| ZkBackendError::Environment(error.to_string()))?
+            .public_inputs_digest();
+    let claim = ReferenceClaim::TransferV2(Box::new(claim.clone()));
+    let env = ExecutorEnv::builder()
+        .write(&claim)
+        .map_err(|error| ZkBackendError::Environment(error.to_string()))?
+        .build()
+        .map_err(|error| ZkBackendError::Environment(error.to_string()))?;
+
+    let started = Instant::now();
+    let prove_info = default_prover()
+        .prove(env, VAULT_ZK_ACCOUNTING_GUEST_ELF)
+        .map_err(|error| ZkBackendError::Proving(error.to_string()))?;
+    let elapsed_ms = started.elapsed().as_millis();
+    prove_info
+        .receipt
+        .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
+        .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
+
+    let journal: ReferenceJournal = prove_info
+        .receipt
+        .journal
+        .decode()
+        .map_err(|error| ZkBackendError::JournalDecoding(error.to_string()))?;
+    let ReferenceJournal::TransferV2(journal) = journal else {
+        return Err(ZkBackendError::JournalDecoding(
+            "guest returned the wrong statement version".to_owned(),
+        ));
+    };
+    if journal.public_inputs_digest != *expected_digest.as_bytes() {
+        return Err(ZkBackendError::PublicInputMismatch);
+    }
+
+    let proof = bincode::serialize(&prove_info.receipt)
+        .map_err(|error| ZkBackendError::ReceiptEncoding(error.to_string()))?;
+    let metrics = ProvingMetrics {
+        elapsed_ms,
+        proof_bytes: proof.len(),
+        segments: prove_info.stats.segments,
+        total_cycles: prove_info.stats.total_cycles,
+        user_cycles: prove_info.stats.user_cycles,
+    };
+    Ok(TransferV2ProofArtifact {
+        proof,
+        journal,
+        metrics,
+    })
+}
+
 /// Decodes and verifies one receipt against an exact transfer public-input digest.
 pub fn verify(
     expected_public_inputs: PublicInputDigest,
@@ -176,10 +254,42 @@ pub fn verify(
     receipt
         .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
         .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
-    let journal: AccountingJournal = receipt
+    let journal: ReferenceJournal = receipt
         .journal
         .decode()
         .map_err(|error| ZkBackendError::JournalDecoding(error.to_string()))?;
+    let ReferenceJournal::AccountingV1(journal) = journal else {
+        return Err(ZkBackendError::JournalDecoding(
+            "guest returned the wrong statement version".to_owned(),
+        ));
+    };
+    if journal.public_inputs_digest != *expected_public_inputs.as_bytes() {
+        return Err(ZkBackendError::PublicInputMismatch);
+    }
+    Ok(journal)
+}
+
+/// Verifies one transfer-v2 receipt against the exact canonical-effects digest.
+/// This remains an isolated research adapter and is not a consensus trait impl.
+pub fn verify_transfer_v2(
+    expected_public_inputs: PublicInputDigest,
+    proof: &[u8],
+) -> Result<vault_zk_accounting_core::transfer_v2::TransferV2ReferenceJournal, ZkBackendError> {
+    reject_development_mode()?;
+    let receipt: Receipt = bincode::deserialize(proof)
+        .map_err(|error| ZkBackendError::ReceiptDecoding(error.to_string()))?;
+    receipt
+        .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
+        .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
+    let journal: ReferenceJournal = receipt
+        .journal
+        .decode()
+        .map_err(|error| ZkBackendError::JournalDecoding(error.to_string()))?;
+    let ReferenceJournal::TransferV2(journal) = journal else {
+        return Err(ZkBackendError::JournalDecoding(
+            "guest returned the wrong statement version".to_owned(),
+        ));
+    };
     if journal.public_inputs_digest != *expected_public_inputs.as_bytes() {
         return Err(ZkBackendError::PublicInputMismatch);
     }
@@ -257,7 +367,7 @@ mod tests {
     fn guest_image_id_changes_require_explicit_review() {
         assert_eq!(
             activated_circuit_id().into_bytes(),
-            REVIEWED_ACCOUNTING_V1_CIRCUIT_ID
+            REVIEWED_REFERENCE_GUEST_ID
         );
     }
 

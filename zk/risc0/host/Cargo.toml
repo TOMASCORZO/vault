@@ -13,6 +13,14 @@ vault-protocol = { path = "../../../crates/vault-protocol" }
 vault-zk-accounting-core = { path = "../core" }
 vault-zk-accounting-methods = { path = "../methods" }
 
+[dev-dependencies]
+incrementalmerkletree = "=0.8.2"
+orchard = { version = "=0.15.5", path = "../../../vendor/orchard", default-features = false, features = ["std"] }
+pasta_curves = "=0.5.2"
+rand_chacha = "0.3.1"
+vault-burn = { path = "../../../crates/vault-burn" }
+vault-privacy = { path = "../../../crates/vault-privacy" }
+
 [lints]
 workspace = true
 

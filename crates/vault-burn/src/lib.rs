@@ -352,6 +352,35 @@ impl BurnCiphertext {
         self.0
     }
 
+    /// Reconstructs the exact circuit-compatible ciphertext from a private
+    /// amount and randomness opening. Reference proof backends use this to
+    /// enforce the same ElGamal equations as the specialized Halo2 gadget.
+    pub fn derive_opening(
+        amount: u64,
+        maximum_amount: u64,
+        epoch_key: &EpochBurnPublicKey,
+        randomness: [u8; 32],
+    ) -> Result<Self, BurnEncryptionError> {
+        if amount > maximum_amount || randomness == [0; 32] {
+            return Err(BurnEncryptionError::AmountOutOfRange);
+        }
+        let randomness_base = Option::<pallas::Base>::from(pallas::Base::from_repr(randomness))
+            .ok_or(BurnEncryptionError::InvalidCiphertext)?;
+        if bool::from(randomness_base.is_zero()) {
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        }
+        let randomness =
+            Option::<pallas::Scalar>::from(pallas::Scalar::from_repr(randomness_base.to_repr()))
+                .ok_or(BurnEncryptionError::InvalidCiphertext)?;
+        let c1 = pallas::Point::generator() * randomness;
+        let c2 = burn_message_generator() * pallas::Scalar::from(amount)
+            + epoch_key.encryption_point() * randomness;
+        if bool::from(c2.is_identity()) {
+            return Err(BurnEncryptionError::InvalidCiphertext);
+        }
+        Self::from_bytes(encode_points(c1, c2))
+    }
+
     fn points(self) -> (pallas::Point, pallas::Point) {
         (
             parse_ciphertext_point(&self.0[..32].try_into().expect("fixed slice length"))

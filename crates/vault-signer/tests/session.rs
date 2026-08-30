@@ -1,9 +1,11 @@
+#[cfg(unix)]
 mod common;
 
 use std::collections::BTreeSet;
 
 use proptest::prelude::*;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+#[cfg(unix)]
 use tempfile::tempdir;
 use vault_privacy::{
     ActionNullifier, KeyScope, MEMO_BYTES, NoteCommitmentTree, OutputAuthorizationIntent,
@@ -15,10 +17,13 @@ use vault_protocol::{
     TransferV2Action, TransferV2Effects, TransferV2SignerPolicy,
 };
 use vault_signer::{
-    BoundTransferV2SigningSession, CrashConsistentReplayStore, DurableReplayGuard,
-    MAX_SIGNER_MESSAGE_BYTES, SIGNER_AUTHORIZATION_REQUEST_MAX_BYTES, SessionChallenge,
-    SessionError, SignerAuthorizationRequest, SignerTransport, SignerTransportMessageKind,
+    BoundTransferV2SigningSession, DurableReplayGuard, MAX_SIGNER_MESSAGE_BYTES,
+    SIGNER_AUTHORIZATION_REQUEST_MAX_BYTES, SessionChallenge, SessionError,
+    SignerAuthorizationRequest,
 };
+
+#[cfg(unix)]
+use vault_signer::{CrashConsistentReplayStore, SignerTransport, SignerTransportMessageKind};
 
 const NETWORK: [u8; 32] = [0x31; 32];
 const CIRCUIT: [u8; 32] = [0x42; 32];
@@ -173,11 +178,13 @@ impl DurableReplayGuard for TestReplayGuard {
     }
 }
 
+#[cfg(unix)]
 fn paired_transport() -> (SignerTransport, SignerTransport) {
     common::paired_transport([0x90; 32], NETWORK)
 }
 
 #[test]
+#[cfg(unix)]
 fn encrypted_challenge_request_and_response_complete_end_to_end() {
     let mut fixture = fixture(2);
     let (mut coordinator_transport, mut signer_transport) = paired_transport();
