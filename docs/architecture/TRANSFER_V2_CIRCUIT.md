@@ -1,7 +1,7 @@
 # Transfer-v2 specialized circuit
 
 **Status:** production-intent implementation in progress; not activatable  
-**Last updated:** 2026-08-22  
+**Last updated:** 2026-08-30
 **Code:** `zk/halo2/core`, `zk/halo2/core/src/accounting.rs`,
 `crates/vault-privacy/src/circuit.rs`
 
@@ -249,9 +249,40 @@ effects-digest binding, measured in one local release run:
 | Standalone verification | 173 ms |
 | Proof bytes | 9,600 |
 
-This supersedes the 9,504-byte shape for future development but remains only a
-single engineering measurement. Only the final reviewed circuit may receive a
-suite ID and verifying key.
+This superseded the 9,504-byte development shape. The final all-bucket freeze
+below increased the degree from `k = 14` to `k = 15` after the 16-action gate
+proved that `k = 14` had insufficient rows.
+
+### Frozen all-bucket monolithic suite
+
+The C2 release gate deterministically derives parameters and proving/verifying
+keys for every consensus bucket at `k = 15`, creates and verifies one real proof
+per bucket, and recomputes the pinned suite ID:
+
+```text
+991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a
+```
+
+The derivation domain and exact byte framing are specified in
+[`PROOF_SETUP.md`](PROOF_SETUP.md). A 2026-08-30 release run on an AMD Ryzen 7
+7730U (8 cores/16 threads, 32 GiB RAM), Windows x86_64, Rust/Cargo 1.98.0,
+reported:
+
+| Padded actions | Parameters + VK/PK | Prove | Verify | Proof bytes |
+|---:|---:|---:|---:|---:|
+| 2 | 18.886 s | 12.484 s | 68.574 ms | 9,664 |
+| 4 | 19.878 s | 12.378 s | 67.710 ms | 9,664 |
+| 8 | 22.800 s | 12.118 s | 53.174 ms | 9,664 |
+| 16 | 29.200 s | 11.773 s | 55.628 ms | 9,664 |
+
+The real two-action fail-closed test mutates every public-instance cell in turn
+and requires verification failure. Native and MockProver tests separately cover
+the private classification boundary: external recipients cannot be claimed as
+change, same-receiver change is accepted, taxable external payment is accepted,
+dummy markers are value-derived, and shifted private accounting values cannot
+reuse Action witnesses. These measurements freeze C2 evidence; they are not a
+capacity claim or a substitute for C4 vectors, C6 repeated comparative
+benchmarks, or C7 independent review.
 
 ## Fail-closed composition
 

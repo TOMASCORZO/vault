@@ -2,15 +2,15 @@
 
 **Status:** specified; implementation remains production-intent and non-activatable
 **Version:** 1
-**Last updated:** 2026-08-29
+**Last updated:** 2026-08-30
 
 ## Scope
 
 This document defines the setup assumptions for Vault's two H1 proof backends.
-It does not assign a production suite ID, approve consensus activation, or
-replace proof-system and circuit review. The epoch threshold burn key is a
-separate distributed-key lifecycle specified in `BURN_ENCRYPTION.md`; it is not
-a proof-system structured reference string.
+It records a reviewed non-activated Halo2 suite ID, but does not approve
+consensus activation or replace proof-system and circuit review. The epoch
+threshold burn key is a separate distributed-key lifecycle specified in
+`BURN_ENCRYPTION.md`; it is not a proof-system structured reference string.
 
 ## Halo2 specialized transfer backend
 
@@ -40,10 +40,23 @@ pinned `PostNu6_3` verifying-key description is:
 8d325ee6753c8effb7d5184bdd729255d2697dd1730c0278084cd91192020e90
 ```
 
-The current monolithic Vault transfer shape uses `k = 12`; its proving key,
-verifying key, accounting suite ID, and serialized parameter hashes are not yet
-frozen. They MUST remain non-activatable until C2 and C4 in
-`../H1_CLOSURE_MATRIX.md` close.
+The frozen monolithic Vault transfer shapes use `k = 15`, the smallest tested
+degree supporting the maximum 16-action bucket. Parameters, VKs, and PKs are
+derived deterministically for each of the 2/4/8/16-action shapes. The BLAKE3
+derive-key digest of their pinned VK descriptions in ascending bucket order is:
+
+```text
+991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a
+```
+
+The domain is
+`vault.zk.halo2.monolithic-transfer-suite.2026-08-30`; each entry commits to
+the little-endian `u16` bucket, little-endian `u64` pinned-description length,
+and exact UTF-8 pinned description. Reproduction is locked to the repository
+dependencies and toolchain because that debug representation is an input to
+the identifier. C2 freezes this identity, while C4 must still publish canonical
+serialized proof/vector artifacts and an offline verifier. The suite MUST remain
+non-activatable until the remaining H1 closure and activation gates pass.
 
 ### Required production artifact procedure
 

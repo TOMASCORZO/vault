@@ -228,7 +228,7 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   implemented and constrained by the Action circuit.
 - Accounting, dummy zeroing, gas, exact burn, conservation, burn commitment,
   and burn ciphertext equations are implemented in a real Halo2 proof shape,
-  and the provisional monolithic circuit now links them to Action values,
+  and the frozen non-activated monolithic circuit links them to Action values,
   derived dummy state, private exact-receiver change classification, the
   activated epoch descriptor, and the complete canonical effects digest.
   Independent local signer reconstruction of note ciphertexts and the

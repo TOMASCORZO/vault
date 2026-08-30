@@ -7,7 +7,7 @@ the code. H1 validates shielded transaction structure and proof-verifier
 integration. The production-intent privacy crate now constructs commitments,
 nullifiers, diversified keys, and authenticated encrypted notes. Transfer-v2
 now canonically connects those public types to an atomic state transition. Its
-provisional monolithic circuit constrains Action ownership and note openings,
+frozen non-activated monolithic circuit constrains Action ownership and note openings,
 private accounting, exact burn encryption, the activated epoch key, and the
 complete effects digest, but no consensus verifier or signer-complete wallet
 flow is activated. A canonical local signing session independently reconstructs

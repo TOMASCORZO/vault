@@ -1,6 +1,6 @@
 # Vault Project Handoff
 
-**Updated:** 2026-08-29
+**Updated:** 2026-08-30
 **Current milestone:** H1 — private-transfer production foundation  
 **Maturity:** production-intent, unaudited, not activated, not safe for real funds
 
@@ -56,22 +56,28 @@ bytes against an explicitly consensus-verified header-source boundary and commit
 one height at a time. The production full-node/light-client adapter does not yet
 exist.
 
-The latest in-progress cryptographic block is C1 in
-`docs/H1_CLOSURE_MATRIX.md`. The isolated RISC Zero core now has a versioned
+The current cryptographic blocks are C1 and C2 in
+`docs/H1_CLOSURE_MATRIX.md`. The isolated RISC Zero core has a versioned
 transfer-v2 statement that reconstructs canonical effects, owned input-note
 openings, Merkle membership, public nullifiers, `ak + alpha`, net-value
 commitments, exact encrypted outputs, receiver-derived classification, gas,
 conservation, ceiling burn, its commitment, and its threshold-ElGamal
-ciphertext. Ten native core tests, strict Clippy, and rustdoc pass on Windows
-with host Rust 1.90. Positive and burn-evasion differential tests feed the same
-exact witness to this reference statement and the Halo2 circuit and pass.
-RISC Zero 3.0.6's native MSVC build still fails in upstream C++17/platform
-linkage before guest regeneration; do not patch the verifier path ad hoc.
-On the Windows Ryzen host, both optional features and WSL 2.7.1 were installed,
-and Ubuntu installation was requested successfully. Windows reported that the
-changes apply after the next restart. After that restart, initialize Ubuntu,
-install the pinned RISC Zero guest toolchain, compile the new host adapter,
-review the new image ID, and generate the real transfer-v2 receipt.
+ciphertext. Linux guest compilation, host tests, strict Clippy/rustdoc, positive
+and burn-evasion differentials, and repeated image-ID reproduction passed. The
+reviewed transfer-v2 image ID is
+`cb95069bf50d37a3e6a9f0fd1519a5676d634c28c6f5a59a335511427cadd032`.
+A real local CPU receipt run was interrupted after roughly five hours and
+produced no receipt artifact; remote proving is unavailable. C1 therefore
+remains open only on real-receipt evidence.
+
+C2 is complete at the implementation-evidence boundary. The monolithic Halo2
+2/4/8/16-action shapes use deterministic transparent parameters at `k = 15`
+and suite ID
+`991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a`.
+Real release proofs for every bucket passed on the Ryzen host, as did mutation
+of every two-action public-instance cell and the private classification/value
+negative matrix. This does not close C4 vectors, C6 comparative benchmarks, C7
+review, or verifier activation.
 
 The last fully reported gates passed 119 workspace tests, formatting, Clippy with
 warnings denied, and rustdoc. Release-sensitive crate testing reported 74 tests.

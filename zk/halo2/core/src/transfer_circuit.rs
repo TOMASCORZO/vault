@@ -37,18 +37,28 @@ use crate::{
 
 const ORCHARD_ACTION_INSTANCE_ROWS: usize = 10;
 const TRANSFER_EFFECTS_DIGEST_LIMBS: usize = 2;
+/// Domain used to derive [`MONOLITHIC_TRANSFER_SUITE_ID`] from the pinned
+/// verifying-key descriptions in ascending bucket order.
+pub const MONOLITHIC_TRANSFER_SUITE_ID_DOMAIN: &str =
+    "vault.zk.halo2.monolithic-transfer-suite.2026-08-30";
 
 /// First accounting-instance row occupied by the canonical 256-bit effects
 /// digest, encoded as two little-endian 128-bit limbs.
 pub const TRANSFER_EFFECTS_DIGEST_INSTANCE_OFFSET: usize =
     BURN_BINDING_INSTANCE_OFFSET + BURN_BINDING_INSTANCE_VALUES;
 
-/// Degree parameter for the current monolithic Action/accounting/burn/effects
-/// shape.
+/// Degree parameter for the monolithic Action/accounting/burn/effects shape.
 ///
-/// This is provisional until the signer policy, all buckets, and production
-/// benchmarks have established the final resource envelope.
-pub const VAULT_TRANSFER_K: u32 = 14;
+/// `k = 15` is the smallest reviewed parameter that key-generates every
+/// consensus action bucket through the maximum 16-action shape.
+pub const VAULT_TRANSFER_K: u32 = 15;
+
+/// Reviewed digest of the pinned verifying keys for the 2/4/8/16-action
+/// monolithic transfer circuits, in ascending bucket order.
+pub const MONOLITHIC_TRANSFER_SUITE_ID: [u8; 32] = [
+    0x99, 0x15, 0x23, 0x42, 0x6f, 0x81, 0xb2, 0x35, 0x0b, 0x1b, 0x08, 0xa7, 0xe2, 0xde, 0x9f, 0x60,
+    0xe3, 0x34, 0xf3, 0x44, 0xe4, 0x0c, 0x23, 0x90, 0x4c, 0x6d, 0xd8, 0xdb, 0x59, 0x37, 0xc8, 0x3a,
+];
 
 /// Native failures while preparing the fixed-shape monolithic witness.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -624,31 +634,74 @@ mod tests {
         ActionNullifier::from_bytes([byte; 32]).unwrap()
     }
 
-    fn two_leaf_paths(commitments: [[u8; 32]; 2]) -> (NoteTreeRoot, [NoteMembershipPath; 2]) {
-        let commitments = commitments.map(|bytes| {
-            Option::<ExtractedNoteCommitment>::from(ExtractedNoteCommitment::from_bytes(&bytes))
-                .unwrap()
-        });
-        let leaves = commitments.map(|cmx| MerkleHashOrchard::from_cmx(&cmx));
-
-        let auth_paths = [0_u32, 1_u32].map(|position| {
-            let mut nodes = [MerkleHashOrchard::empty_leaf(); 32];
-            nodes[0] = leaves[1 - position as usize];
-            for level in 1_u8..32 {
-                nodes[usize::from(level)] = MerkleHashOrchard::empty_root(Level::from(level));
+    fn membership_paths(commitment_bytes: &[[u8; 32]]) -> (NoteTreeRoot, Vec<NoteMembershipPath>) {
+        assert!(!commitment_bytes.is_empty());
+        let commitments = commitment_bytes
+            .iter()
+            .map(|bytes| {
+                Option::<ExtractedNoteCommitment>::from(ExtractedNoteCommitment::from_bytes(bytes))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut levels = Vec::with_capacity(33);
+        levels.push(
+            commitments
+                .iter()
+                .map(MerkleHashOrchard::from_cmx)
+                .collect::<Vec<_>>(),
+        );
+        for level in 0_u8..32 {
+            let current = &levels[usize::from(level)];
+            let mut next = Vec::with_capacity(current.len().div_ceil(2));
+            for pair in current.chunks(2) {
+                let left = pair[0];
+                let right = pair
+                    .get(1)
+                    .copied()
+                    .unwrap_or_else(|| MerkleHashOrchard::empty_root(Level::from(level)));
+                next.push(MerkleHashOrchard::combine(
+                    Level::from(level),
+                    &left,
+                    &right,
+                ));
             }
-            let orchard_path = MerklePath::from_parts(position, nodes);
-            let root = orchard_path.root(commitments[position as usize]);
-            let path = NoteMembershipPath::from_parts(position, nodes.map(|node| node.to_bytes()))
-                .unwrap();
-            (root, path)
-        });
+            levels.push(next);
+        }
 
-        assert_eq!(auth_paths[0].0, auth_paths[1].0);
-        (
-            NoteTreeRoot::from_bytes(auth_paths[0].0.to_bytes()).unwrap(),
-            [auth_paths[0].1.clone(), auth_paths[1].1.clone()],
-        )
+        let paths = commitments
+            .iter()
+            .enumerate()
+            .map(|(position, commitment)| {
+                let nodes = std::array::from_fn(|level| {
+                    let sibling = (position >> level) ^ 1;
+                    levels[level]
+                        .get(sibling)
+                        .copied()
+                        .unwrap_or_else(|| MerkleHashOrchard::empty_root(Level::from(level as u8)))
+                });
+                let path = MerklePath::from_parts(position as u32, nodes);
+                let root = path.root(*commitment);
+                (root, path)
+            })
+            .collect::<Vec<_>>();
+        let root = paths[0].0;
+        assert!(paths.iter().all(|(candidate, _)| *candidate == root));
+        let paths = paths
+            .into_iter()
+            .map(|(_, path)| {
+                NoteMembershipPath::from_parts(
+                    path.position(),
+                    path.auth_path().map(|node| node.to_bytes()),
+                )
+                .unwrap()
+            })
+            .collect();
+        (NoteTreeRoot::from_bytes(root.to_bytes()).unwrap(), paths)
+    }
+
+    fn two_leaf_paths(commitments: [[u8; 32]; 2]) -> (NoteTreeRoot, [NoteMembershipPath; 2]) {
+        let (root, paths) = membership_paths(&commitments);
+        (root, paths.try_into().unwrap())
     }
 
     #[derive(Debug)]
@@ -879,6 +932,135 @@ mod tests {
             epoch_key,
             reference,
         })
+    }
+
+    fn valid_bucket<const N: usize>() -> PreparedVaultTransfer<N> {
+        assert!(ALLOWED_TRANSFER_V2_ACTION_COUNTS.contains(&N));
+        let spending_key = VaultSpendingKey::derive(&[0xD1; 32], NETWORK, 1).unwrap();
+        let full_viewing_key = spending_key.full_viewing_key();
+        let input_address = full_viewing_key.address_at(0, KeyScope::Internal);
+        let external_recipient = VaultSpendingKey::derive(&[0xD2; 32], NETWORK, 1)
+            .unwrap()
+            .full_viewing_key()
+            .address_at(0, KeyScope::External);
+        let mut rng = ChaCha20Rng::from_seed([0xD3; 32]);
+
+        let inputs = (0..N)
+            .map(|index| {
+                PrivateNote::create(
+                    input_address,
+                    if index == 0 { 5_051 } else { 1_000 },
+                    MAXIMUM_VALUE,
+                    nullifier(u8::try_from(index + 32).unwrap()),
+                    &mut rng,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let commitments = inputs
+            .iter()
+            .map(|input| input.commitment().unwrap())
+            .collect::<Vec<_>>();
+        let (anchor, paths) = membership_paths(&commitments);
+
+        let mut prepared = Vec::with_capacity(N);
+        for index in 0..N {
+            let action_nullifier = full_viewing_key.note_nullifier(&inputs[index]).unwrap();
+            let recipient = if index == 0 {
+                external_recipient
+            } else {
+                input_address
+            };
+            let output_value = if index == 0 { 5_000 } else { 1_000 };
+            let output = PreparedNoteOutput::create(
+                &full_viewing_key,
+                KeyScope::External,
+                recipient,
+                output_value,
+                MAXIMUM_VALUE,
+                action_nullifier,
+                [u8::try_from(index).unwrap(); MEMO_BYTES],
+                &mut rng,
+            )
+            .unwrap();
+            let authorization = spending_key.prepare_spend_authorization(&mut rng).unwrap();
+            let net_value =
+                PreparedNetValueCommitment::create(inputs[index].value(), output_value, &mut rng)
+                    .unwrap();
+            let circuit = PreparedActionCircuit::new(
+                &full_viewing_key,
+                &inputs[index],
+                &paths[index],
+                &output,
+                &authorization,
+                &net_value,
+                anchor,
+            )
+            .unwrap();
+            let public_action = TransferV2Action::new(
+                action_nullifier,
+                RandomizedSpendValidatingKey::from_bytes(
+                    authorization.randomized_verification_key(),
+                )
+                .unwrap(),
+                net_value.commitment(),
+                output.encrypted_note().clone(),
+            );
+            prepared.push((
+                action_nullifier,
+                circuit,
+                public_action,
+                AccountingActionWitness::enabled(inputs[index].value(), output_value, index == 0),
+            ));
+        }
+        prepared.sort_by_key(|(action_nullifier, _, _, _)| *action_nullifier);
+        let mut circuits = Vec::with_capacity(N);
+        let mut public_actions = Vec::with_capacity(N);
+        let mut accounting_actions = Vec::with_capacity(N);
+        for (_, circuit, public_action, accounting) in prepared {
+            circuits.push(circuit);
+            public_actions.push(public_action);
+            accounting_actions.push(accounting);
+        }
+        let arithmetic = PreparedAccountingArithmetic::new(
+            accounting_actions.try_into().unwrap(),
+            GAS_UNITS,
+            FEE_PER_GAS,
+        )
+        .unwrap();
+
+        let coefficients = [pallas::Scalar::from(7), pallas::Scalar::from(11)];
+        let commitments = coefficients.map(|value| {
+            use pasta_curves::group::{Group, GroupEncoding};
+            (pallas::Point::generator() * value).to_bytes()
+        });
+        let epoch_key =
+            EpochBurnPublicKey::from_parts(9, 2, vec![1, 2, 3], commitments.to_vec()).unwrap();
+        let commitment =
+            PreparedBurnCommitment::create(arithmetic.burn(), MAXIMUM_VALUE, &mut rng).unwrap();
+        let ciphertext =
+            PreparedBurnCiphertext::encrypt(arithmetic.burn(), MAXIMUM_VALUE, &epoch_key, &mut rng)
+                .unwrap();
+        let accounting =
+            PreparedAccountingBurn::new(arithmetic, &commitment, &ciphertext, &epoch_key).unwrap();
+        let effects = TransferV2Effects::new(
+            ChainId::new(NETWORK),
+            CircuitId::new([0xC4; 32]),
+            anchor,
+            EncryptedBurnV2::from_threshold_ciphertext(
+                &epoch_key,
+                commitment.commitment(),
+                ciphertext.ciphertext(),
+            )
+            .unwrap(),
+            GasParameters {
+                units: GAS_UNITS,
+                fee_per_gas: FEE_PER_GAS,
+            },
+            public_actions,
+        )
+        .unwrap();
+        PreparedVaultTransfer::new(circuits, accounting, &effects, &epoch_key).unwrap()
     }
 
     fn effects_with_burn(effects: &TransferV2Effects, burn: EncryptedBurnV2) -> TransferV2Effects {
@@ -1196,6 +1378,77 @@ mod tests {
         assert!(prover.verify().is_err());
     }
 
+    fn prove_real_bucket<const N: usize>() -> String {
+        let prepared = valid_bucket::<N>();
+        let circuit = prepared.circuit();
+        let empty_circuit = circuit.without_witnesses();
+        let public = prepared.public_inputs();
+        let public_columns = public.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let proof_instances = [&public_columns[..]];
+
+        let keygen_started = Instant::now();
+        let params: Params<EqAffine> = Params::new(VAULT_TRANSFER_K);
+        let vk = keygen_vk(&params, &empty_circuit).expect("bucket verifying key");
+        let pk = keygen_pk(&params, vk, &empty_circuit).expect("bucket proving key");
+        let keygen_elapsed = keygen_started.elapsed();
+
+        let proving_started = Instant::now();
+        let mut transcript =
+            Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+        create_proof(
+            &params,
+            &pk,
+            &[circuit],
+            &proof_instances,
+            ChaCha20Rng::from_seed([u8::try_from(N).unwrap(); 32]),
+            &mut transcript,
+        )
+        .expect("bucket proof generation");
+        let proof = transcript.finalize();
+        let proving_elapsed = proving_started.elapsed();
+
+        let verification_started = Instant::now();
+        let strategy = SingleVerifier::new(&params);
+        let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&proof);
+        verify_proof(
+            &params,
+            pk.get_vk(),
+            strategy,
+            &proof_instances,
+            &mut transcript,
+        )
+        .expect("bucket proof verification");
+        let verification_elapsed = verification_started.elapsed();
+
+        eprintln!(
+            "Vault bucket={N} keygen={keygen_elapsed:?} prove={proving_elapsed:?} verify={verification_elapsed:?} proof_bytes={}",
+            proof.len()
+        );
+        format!("{:?}", pk.get_vk().pinned())
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        ignore = "real all-bucket proof evidence runs in the release-mode Halo2 CI gate"
+    )]
+    fn real_monolithic_proof_covers_every_consensus_bucket() {
+        let mut hasher = blake3::Hasher::new_derive_key(MONOLITHIC_TRANSFER_SUITE_ID_DOMAIN);
+        for (bucket, pinned) in [
+            (2_u16, prove_real_bucket::<2>()),
+            (4_u16, prove_real_bucket::<4>()),
+            (8_u16, prove_real_bucket::<8>()),
+            (16_u16, prove_real_bucket::<16>()),
+        ] {
+            hasher.update(&bucket.to_le_bytes());
+            hasher.update(&(pinned.len() as u64).to_le_bytes());
+            hasher.update(pinned.as_bytes());
+        }
+        let suite_id = hasher.finalize();
+        assert_eq!(suite_id.as_bytes(), &MONOLITHIC_TRANSFER_SUITE_ID);
+        eprintln!("Vault monolithic suite_id={}", suite_id.to_hex());
+    }
+
     #[test]
     #[cfg_attr(
         debug_assertions,
@@ -1261,46 +1514,33 @@ mod tests {
             .is_err()
         );
 
-        let mut wrong_public = public.clone();
-        wrong_public[0][1] += Fp::one();
-        let wrong_columns = wrong_public.iter().map(Vec::as_slice).collect::<Vec<_>>();
-        let wrong_instances = [&wrong_columns[..]];
-        let strategy = SingleVerifier::new(&params);
-        let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&proof);
-        assert!(
-            verify_proof(
-                &params,
-                pk.get_vk(),
-                strategy,
-                &wrong_instances,
-                &mut transcript,
-            )
-            .is_err()
-        );
-
-        let mut wrong_effects_digest = public;
-        wrong_effects_digest[1][TRANSFER_EFFECTS_DIGEST_INSTANCE_OFFSET] += Fp::one();
-        let wrong_columns = wrong_effects_digest
-            .iter()
-            .map(Vec::as_slice)
-            .collect::<Vec<_>>();
-        let wrong_instances = [&wrong_columns[..]];
-        let strategy = SingleVerifier::new(&params);
-        let mut transcript = Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&proof);
-        assert!(
-            verify_proof(
-                &params,
-                pk.get_vk(),
-                strategy,
-                &wrong_instances,
-                &mut transcript,
-            )
-            .is_err()
-        );
+        let public_instance_cells = public.iter().map(Vec::len).sum::<usize>();
+        for column in 0..public.len() {
+            for row in 0..public[column].len() {
+                let mut wrong_public = public.clone();
+                wrong_public[column][row] += Fp::one();
+                let wrong_columns = wrong_public.iter().map(Vec::as_slice).collect::<Vec<_>>();
+                let wrong_instances = [&wrong_columns[..]];
+                let strategy = SingleVerifier::new(&params);
+                let mut transcript =
+                    Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&proof);
+                assert!(
+                    verify_proof(
+                        &params,
+                        pk.get_vk(),
+                        strategy,
+                        &wrong_instances,
+                        &mut transcript,
+                    )
+                    .is_err(),
+                    "proof accepted mutated public instance at column {column}, row {row}"
+                );
+            }
+        }
 
         eprintln!(
-            "Vault transfer keygen={keygen_elapsed:?} prove={proving_elapsed:?} verify={verification_elapsed:?} proof_bytes={}",
-            proof.len()
+            "Vault transfer keygen={keygen_elapsed:?} prove={proving_elapsed:?} verify={verification_elapsed:?} proof_bytes={} mutated_public_cells={public_instance_cells}",
+            proof.len(),
         );
     }
 }

@@ -38,7 +38,7 @@ The production-intent key and note-encryption implementation is specified in
 implementation rather than reimplementing its primitives. Its real Halo2 Action
 proof is connected to transfer-v2 through a composite, fail-closed proof format,
 and the second layer now has real range-constrained accounting plus burn
-commitment/threshold-ElGamal equations. A provisional monolithic circuit now
+commitment/threshold-ElGamal equations. A frozen non-activated monolithic circuit now
 links Action note values, private change classification, and derived dummy
 state to that accounting. Validator-side reconstruction binds the activated
 epoch DKG descriptor to `PK_epoch`, while two lossless public limbs bind the
