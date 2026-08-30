@@ -79,6 +79,13 @@ of every two-action public-instance cell and the private classification/value
 negative matrix. This does not close C4 vectors, C6 comparative benchmarks, C7
 review, or verifier activation.
 
+The Halo2 half of C4 is now committed under
+`zk/halo2/core/tests/vectors`: four 9,664-byte real proofs, canonical public
+instances, a SHA-256/toolchain manifest, deterministic reproduction, and an
+offline verifier that rejects a changed proof byte and every public-instance
+cell mutation. C4 remains in progress because the RISC Zero vector depends on
+the missing C1 real receipt.
+
 The last fully reported gates passed 119 workspace tests, formatting, Clippy with
 warnings denied, and rustdoc. Release-sensitive crate testing reported 74 tests.
 The dependency audit saw 171 dependencies, no known vulnerability, and one allowed

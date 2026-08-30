@@ -1,0 +1,101 @@
+{
+  "schema": "vault.halo2.transfer-proof-vectors",
+  "version": 1,
+  "status": "production-intent; non-activatable",
+  "generated_at": "2026-08-30",
+  "backend": {
+    "halo2_proofs": "0.3.5",
+    "orchard": "0.15.5 PostNu6_3",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "cargo": "1.98.0 (797e8a9bc 2026-08-05)",
+    "target": "x86_64-pc-windows-msvc"
+  },
+  "suite": {
+    "id": "991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a",
+    "domain": "vault.zk.halo2.monolithic-transfer-suite.2026-08-30",
+    "k": 15,
+    "proof_bytes_exact": 9664,
+    "action_buckets": [2, 4, 8, 16]
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 7 7730U",
+    "physical_cores": 8,
+    "logical_processors": 16,
+    "memory_bytes": 33663741952
+  },
+  "instances_encoding": {
+    "magic": "VHV1",
+    "version": 1,
+    "integer_encoding": "little-endian",
+    "field_encoding": "canonical 32-byte little-endian Pallas base-field representation",
+    "layout": "magic[4] || version[u16] || bucket[u16] || columns[u16] || repeated(rows[u32] || field[32]*rows)"
+  },
+  "negative_vectors": [
+    {
+      "mutation": "xor 0x01 at proof[floor(proof_length/2)]",
+      "expected": "reject"
+    },
+    {
+      "mutation": "for every public instance cell independently, add Pallas base-field one",
+      "expected": "reject each mutation"
+    }
+  ],
+  "vectors": [
+    {
+      "bucket": 2,
+      "instances": {
+        "file": "halo2-transfer-v1-2.instances.bin",
+        "bytes": 1042,
+        "sha256": "0569aa75d413ff566edb316f43979d351b6bf7f070131c5a9d3e54c3b36235a0"
+      },
+      "proof": {
+        "file": "halo2-transfer-v1-2.proof.bin",
+        "bytes": 9664,
+        "sha256": "40489f9bc130761401716c15edcdd7e70687a4801028d167ba229fee55b708a4"
+      },
+      "expected": "accept"
+    },
+    {
+      "bucket": 4,
+      "instances": {
+        "file": "halo2-transfer-v1-4.instances.bin",
+        "bytes": 1682,
+        "sha256": "82530adbeed5821cc3d597931dbe04dea775dd238863761f0cde727b0329ed2f"
+      },
+      "proof": {
+        "file": "halo2-transfer-v1-4.proof.bin",
+        "bytes": 9664,
+        "sha256": "42dc7b2c925cd9d69add4971550e8f4713a3d9fa0ba0100a3bf378ee138b6a81"
+      },
+      "expected": "accept"
+    },
+    {
+      "bucket": 8,
+      "instances": {
+        "file": "halo2-transfer-v1-8.instances.bin",
+        "bytes": 2962,
+        "sha256": "8125e4ba2d399763c8daa8f214d5636f57205614d6cbc57a8a48a8829dcff44b"
+      },
+      "proof": {
+        "file": "halo2-transfer-v1-8.proof.bin",
+        "bytes": 9664,
+        "sha256": "619e3c7ab842f22a271d29b5582bed2a787ace05cab896fbe14ca565ee82629e"
+      },
+      "expected": "accept"
+    },
+    {
+      "bucket": 16,
+      "instances": {
+        "file": "halo2-transfer-v1-16.instances.bin",
+        "bytes": 5522,
+        "sha256": "da0bfdc8d9fbf84f6c6a260f118a3bc7c59994b2a506e167492020ce4a9e7a48"
+      },
+      "proof": {
+        "file": "halo2-transfer-v1-16.proof.bin",
+        "bytes": 9664,
+        "sha256": "f26abdfe0d898208107a81ef37b018413ad5a7b82aaeef0615818e801da97eba"
+      },
+      "expected": "accept"
+    }
+  ]
+}

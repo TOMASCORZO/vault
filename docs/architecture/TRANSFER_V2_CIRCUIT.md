@@ -284,6 +284,12 @@ reuse Action witnesses. These measurements freeze C2 evidence; they are not a
 capacity claim or a substitute for C4 vectors, C6 repeated comparative
 benchmarks, or C7 independent review.
 
+The corresponding C4 Halo2 proof and public-instance artifacts, SHA-256
+manifest, reproduction procedure, and offline mutation verifier are published
+under [`../../zk/halo2/core/tests/vectors`](../../zk/halo2/core/tests/vectors/VERIFY.md).
+This is only the Halo2 half of C4; the RISC Zero half cannot be published until
+the C1 real receipt exists.
+
 ## Fail-closed composition
 
 The canonical `VZK2` proof envelope contains the Action verifying-key ID, an

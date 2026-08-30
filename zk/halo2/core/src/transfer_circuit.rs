@@ -6,8 +6,8 @@
 //! additionally constrained to the exact expanded receiver of its paired
 //! consumed note, while the classification bit remains private.
 //!
-//! The shape remains non-activatable: note-ciphertext policy, all-bucket
-//! vectors, benchmarks, and independent review are still mandatory.
+//! The shape remains non-activatable: both-backend vectors, benchmarks, and
+//! independent review are still mandatory.
 
 use ff::PrimeField;
 use halo2_proofs::{
@@ -59,6 +59,9 @@ pub const MONOLITHIC_TRANSFER_SUITE_ID: [u8; 32] = [
     0x99, 0x15, 0x23, 0x42, 0x6f, 0x81, 0xb2, 0x35, 0x0b, 0x1b, 0x08, 0xa7, 0xe2, 0xde, 0x9f, 0x60,
     0xe3, 0x34, 0xf3, 0x44, 0xe4, 0x0c, 0x23, 0x90, 0x4c, 0x6d, 0xd8, 0xdb, 0x59, 0x37, 0xc8, 0x3a,
 ];
+
+/// Canonical proof length for each circuit in the frozen monolithic suite.
+pub const MONOLITHIC_TRANSFER_PROOF_BYTES: usize = 9_664;
 
 /// Native failures while preparing the fixed-shape monolithic witness.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -1378,7 +1381,133 @@ mod tests {
         assert!(prover.verify().is_err());
     }
 
-    fn prove_real_bucket<const N: usize>() -> String {
+    fn encode_vector_instances<const N: usize>(public: &[Vec<Fp>]) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(b"VHV1");
+        encoded.extend_from_slice(&1_u16.to_le_bytes());
+        encoded.extend_from_slice(&u16::try_from(N).unwrap().to_le_bytes());
+        encoded.extend_from_slice(&u16::try_from(public.len()).unwrap().to_le_bytes());
+        for column in public {
+            encoded.extend_from_slice(&u32::try_from(column.len()).unwrap().to_le_bytes());
+            for value in column {
+                encoded.extend_from_slice(value.to_repr().as_ref());
+            }
+        }
+        encoded
+    }
+
+    fn publish_vector_if_requested<const N: usize>(public: &[Vec<Fp>], proof: &[u8]) {
+        let Some(directory) = std::env::var_os("VAULT_HALO2_VECTOR_DIR") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).expect("create Halo2 vector directory");
+        let stem = format!("halo2-transfer-v1-{N}");
+        std::fs::write(
+            directory.join(format!("{stem}.instances.bin")),
+            encode_vector_instances::<N>(public),
+        )
+        .expect("write Halo2 public-instance vector");
+        std::fs::write(directory.join(format!("{stem}.proof.bin")), proof)
+            .expect("write Halo2 proof vector");
+    }
+
+    fn decode_vector_instances<const N: usize>(
+        encoded: &[u8],
+    ) -> Result<Vec<Vec<Fp>>, &'static str> {
+        fn take<const M: usize>(
+            encoded: &[u8],
+            offset: &mut usize,
+        ) -> Result<[u8; M], &'static str> {
+            let end = offset
+                .checked_add(M)
+                .ok_or("instance-vector offset overflow")?;
+            let bytes = encoded
+                .get(*offset..end)
+                .ok_or("truncated instance vector")?;
+            *offset = end;
+            bytes
+                .try_into()
+                .map_err(|_| "invalid instance-vector slice")
+        }
+
+        let mut offset = 0;
+        if take::<4>(encoded, &mut offset)? != *b"VHV1"
+            || u16::from_le_bytes(take(encoded, &mut offset)?) != 1
+            || usize::from(u16::from_le_bytes(take(encoded, &mut offset)?)) != N
+        {
+            return Err("wrong instance-vector header");
+        }
+        let column_count = usize::from(u16::from_le_bytes(take(encoded, &mut offset)?));
+        if column_count != 2 {
+            return Err("wrong instance-vector column count");
+        }
+
+        let mut columns = Vec::with_capacity(column_count);
+        for _ in 0..column_count {
+            let rows = usize::try_from(u32::from_le_bytes(take(encoded, &mut offset)?))
+                .map_err(|_| "instance-vector row count does not fit usize")?;
+            let mut column = Vec::with_capacity(rows);
+            for _ in 0..rows {
+                let mut representation = <Fp as PrimeField>::Repr::default();
+                representation
+                    .as_mut()
+                    .copy_from_slice(&take::<32>(encoded, &mut offset)?);
+                column.push(
+                    Option::<Fp>::from(Fp::from_repr(representation))
+                        .ok_or("non-canonical instance field")?,
+                );
+            }
+            columns.push(column);
+        }
+        if offset != encoded.len()
+            || columns[0].len() != N * ORCHARD_ACTION_INSTANCE_ROWS
+            || columns[1].len()
+                != TRANSFER_EFFECTS_DIGEST_INSTANCE_OFFSET + TRANSFER_EFFECTS_DIGEST_LIMBS
+        {
+            return Err("wrong instance-vector shape or trailing bytes");
+        }
+        Ok(columns)
+    }
+
+    fn verify_published_vector<const N: usize>(encoded: &[u8], proof: &[u8]) {
+        assert_eq!(proof.len(), MONOLITHIC_TRANSFER_PROOF_BYTES);
+        let public = decode_vector_instances::<N>(encoded).expect("canonical public instances");
+        let empty_circuit = valid_bucket::<N>().circuit().without_witnesses();
+        let params: Params<EqAffine> = Params::new(VAULT_TRANSFER_K);
+        let vk = keygen_vk(&params, &empty_circuit).expect("published vector verifying key");
+
+        let verify = |candidate_public: &[Vec<Fp>], candidate_proof: &[u8]| {
+            let columns = candidate_public
+                .iter()
+                .map(Vec::as_slice)
+                .collect::<Vec<_>>();
+            let instances = [&columns[..]];
+            let strategy = SingleVerifier::new(&params);
+            let mut transcript =
+                Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(candidate_proof);
+            verify_proof(&params, &vk, strategy, &instances, &mut transcript)
+        };
+
+        verify(&public, proof).expect("published positive proof");
+        let mut tampered_proof = proof.to_vec();
+        let middle = tampered_proof.len() / 2;
+        tampered_proof[middle] ^= 1;
+        assert!(verify(&public, &tampered_proof).is_err());
+
+        for column in 0..public.len() {
+            for row in 0..public[column].len() {
+                let mut mutated = public.clone();
+                mutated[column][row] += Fp::one();
+                assert!(
+                    verify(&mutated, proof).is_err(),
+                    "published proof accepted public mutation at column {column}, row {row}"
+                );
+            }
+        }
+    }
+
+    fn prove_real_bucket<const N: usize>() -> (String, Vec<Vec<Fp>>, Vec<u8>) {
         let prepared = valid_bucket::<N>();
         let circuit = prepared.circuit();
         let empty_circuit = circuit.without_witnesses();
@@ -1424,7 +1553,8 @@ mod tests {
             "Vault bucket={N} keygen={keygen_elapsed:?} prove={proving_elapsed:?} verify={verification_elapsed:?} proof_bytes={}",
             proof.len()
         );
-        format!("{:?}", pk.get_vk().pinned())
+        publish_vector_if_requested::<N>(&public, &proof);
+        (format!("{:?}", pk.get_vk().pinned()), public, proof)
     }
 
     #[test]
@@ -1434,7 +1564,7 @@ mod tests {
     )]
     fn real_monolithic_proof_covers_every_consensus_bucket() {
         let mut hasher = blake3::Hasher::new_derive_key(MONOLITHIC_TRANSFER_SUITE_ID_DOMAIN);
-        for (bucket, pinned) in [
+        for (bucket, (pinned, _, _)) in [
             (2_u16, prove_real_bucket::<2>()),
             (4_u16, prove_real_bucket::<4>()),
             (8_u16, prove_real_bucket::<8>()),
@@ -1447,6 +1577,30 @@ mod tests {
         let suite_id = hasher.finalize();
         assert_eq!(suite_id.as_bytes(), &MONOLITHIC_TRANSFER_SUITE_ID);
         eprintln!("Vault monolithic suite_id={}", suite_id.to_hex());
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        ignore = "published real-proof vectors are verified by the release-mode offline gate"
+    )]
+    fn published_halo2_vectors_verify_offline_and_reject_mutations() {
+        verify_published_vector::<2>(
+            include_bytes!("../tests/vectors/halo2-transfer-v1-2.instances.bin"),
+            include_bytes!("../tests/vectors/halo2-transfer-v1-2.proof.bin"),
+        );
+        verify_published_vector::<4>(
+            include_bytes!("../tests/vectors/halo2-transfer-v1-4.instances.bin"),
+            include_bytes!("../tests/vectors/halo2-transfer-v1-4.proof.bin"),
+        );
+        verify_published_vector::<8>(
+            include_bytes!("../tests/vectors/halo2-transfer-v1-8.instances.bin"),
+            include_bytes!("../tests/vectors/halo2-transfer-v1-8.proof.bin"),
+        );
+        verify_published_vector::<16>(
+            include_bytes!("../tests/vectors/halo2-transfer-v1-16.instances.bin"),
+            include_bytes!("../tests/vectors/halo2-transfer-v1-16.proof.bin"),
+        );
     }
 
     #[test]
