@@ -18,6 +18,27 @@ task, or session change. Do not infer project status from a prompt such as
 5. Keep the change inside that item; do not create a prototype or silently add a
    trusted, mock, fail-open, or unbounded production path.
 
+### Repository continuation point
+
+The authoritative continuation branch is `codex/c1-transfer-v2` on
+`https://github.com/TOMASCORZO/vault`. Its latest published commits are:
+
+```text
+f285eaa Publish Halo2 transfer proof vectors
+f92df9b Freeze all Halo2 transfer buckets
+5bed963 Enable remote C1 proving with Bonsai
+c825bf6 Advance H1 cryptography and storage hardening
+```
+
+On another machine or account, fetch and switch to that branch before making
+changes:
+
+```bash
+git fetch origin
+git switch codex/c1-transfer-v2
+git pull --ff-only
+```
+
 ## Product objective
 
 Vault is intended to become a privacy-first, permissionless blockchain with a
@@ -86,11 +107,51 @@ offline verifier that rejects a changed proof byte and every public-instance
 cell mutation. C4 remains in progress because the RISC Zero vector depends on
 the missing C1 real receipt.
 
-The last fully reported gates passed 119 workspace tests, formatting, Clippy with
-warnings denied, and rustdoc. Release-sensitive crate testing reported 74 tests.
-The dependency audit saw 171 dependencies, no known vulnerability, and one allowed
-inactive unmaintained `atomic-polyfill 1.0.3` warning. Re-run the gates rather than
-assuming these numbers remain current.
+The latest Halo2 gate on the Windows Ryzen host passed formatting, workspace
+check, Clippy with warnings denied, rustdoc, 22 release library tests, and two
+real-proof integration tests. This includes real 2/4/8/16-action proofs, the
+fixed suite-ID reproduction, the committed-vector offline verifier, every
+public-instance mutation, accounting/burn proof verification, and the hardened
+Action proof. The Linux RISC Zero gate separately passed ten core tests, three
+host tests, guest compilation, Clippy, rustdoc, image-ID reproduction, and the
+native/Halo2 differentials. The prior root baseline passed 119 workspace tests.
+Re-run the gate affected by a change rather than assuming these counts remain
+current.
+
+## Device transition: Ryzen to Apple M1
+
+Development can continue on the M1. The stronger Ryzen device has completed the
+heavy evidence needed for the current implementation step:
+
+- real Halo2 proofs for every 2/4/8/16-action bucket at `k = 15`;
+- all-bucket deterministic VK/suite-ID reproduction;
+- generation and offline positive/negative verification of all committed
+  Halo2 C4 vectors;
+- Linux compilation and repeated image-ID reproduction for the RISC Zero
+  transfer-v2 guest;
+- the full affected formatting, check, Clippy, rustdoc, native, differential,
+  and release-test gates.
+
+No additional test on this Ryzen machine blocks continued implementation on the
+M1. Work that is safe and useful on the M1 includes C5's normative burn
+aggregation/low-volume design, C4/C6 tooling and documentation, ordinary Rust
+tests, and the applicable A1-A4 hardening tasks.
+
+Two heavy evidence items are still genuinely open, but neither should be
+silently replaced or repeatedly started during normal M1 development:
+
+1. C1/C4 need one real RISC Zero transfer-v2 receipt and its published vector.
+   The Ryzen CPU attempt ran for roughly five hours before interruption and
+   produced no artifact. Development-mode execution is not a receipt. Run this
+   only when a maintained remote prover or a deliberately provisioned proving
+   machine is available.
+2. C6 needs a planned repeated comparative benchmark of at least two maintained
+   proof implementations, including peak memory, concurrency, and all buckets.
+   The existing Ryzen measurements are engineering evidence, not that final
+   benchmark. It can be scheduled later on declared comparable hardware.
+
+C7 remains external independent review. Do not mark C1, C4, C6, C7, or A5
+complete merely because implementation continues successfully on the M1.
 
 ## H1 scope correction
 
@@ -136,9 +197,14 @@ cryptographic scope.
 
 ## Suggested first prompt in a new account
 
-> Open `/Users/tomascorzo/vault`. Read `AGENTS.md` and every document it requires.
-> Inspect the entire working tree and run the baseline gates. Summarize the current
-> H1 implementation, its honest maturity, and the finite remaining H1 closure
-> matrix before editing. Then continue only the next cryptographic H1 item from
-> that matrix. Do not create prototypes, expand H1 with H2/mainnet work, start
-> contracts, use real funds, or claim production readiness.
+> Open `/Users/tomascorzo/vault`, fetch origin, switch to
+> `codex/c1-transfer-v2`, and pull with `--ff-only`. Read `AGENTS.md` and every
+> document it requires, especially `docs/HANDOFF.md` and
+> `docs/H1_CLOSURE_MATRIX.md`. Preserve C2 as complete and C4 as in progress,
+> with only its Halo2 half complete. C1/C4 remain blocked on a real RISC Zero
+> receipt; do not substitute dev mode or automatically restart the multi-hour
+> CPU prover.
+> Continue the next locally actionable bounded item, normally C5, while keeping
+> C1-C7 separate from A1-A5 and H2. Do not create prototypes, expand H1 with
+> H2/mainnet work, start contracts, use real funds, or claim production
+> readiness.
