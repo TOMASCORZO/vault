@@ -4,6 +4,11 @@
 **Tool:** `cargo-audit 0.22.2`, RustSec database with 1,225 advisories  
 **Decision:** backend remains ineligible for consensus activation.
 
+**CUDA re-scan:** 2026-08-30, RustSec database with 1,226 advisories. Enabling
+the host-only `risc0-zkvm/cuda` feature expands the locked optional dependency
+graph but leaves the two known vulnerabilities below unchanged. The scan still
+fails as required; the CUDA evidence path remains non-activatable.
+
 ## Remediation performed
 
 The first scan found four vulnerabilities. Vault raised only the isolated ZK
@@ -55,11 +60,19 @@ The host lock also reports:
 - `atomic-polyfill` 1.0.3 through `heapless`/`postcard`;
 - `bincode` 1.3.3 through RISC Zero and Vault receipt serialization;
 - `derivative` 2.2.0 through Arkworks;
+- `number_prefix` 0.4.0 through the CUDA-enabled
+  `risc0-groth16`/`circom-witnesscalc` dependency graph, even though the C1 run
+  requests a Composite receipt and never invokes Groth16 wrapping;
 - `paste` 1.0.15 through Arkworks and RISC Zero.
 
 The guest lock reports `derivative` and `paste`. These are warnings rather than
 known vulnerabilities, but the final proof backend must remove, replace, or
 obtain an audited maintenance plan for each one.
+
+The host lock also contains the yanked target-specific `chacha20` 0.10.1
+release. It predates the CUDA lock expansion and remains another reason the
+backend cannot advance beyond isolated evidence without a reviewed dependency
+upgrade.
 
 ## Activation gate
 
@@ -76,4 +89,3 @@ RustSec vulnerability. Upgrading RISC Zero or Arkworks requires:
 Reproduce both scans with `./scripts/audit-zk-risc0.sh`. A nonzero exit is
 expected until the blockers above are resolved; it must never be allowlisted
 as a passing production gate.
-

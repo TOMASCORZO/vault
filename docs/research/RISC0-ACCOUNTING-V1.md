@@ -193,6 +193,14 @@ wallet witnesses must not be submitted to a third-party prover without a
 separate privacy, retention, and trust decision. Free or trial Bonsai access is
 account-dependent and is not assumed by this procedure.
 
+For a deliberately provisioned Linux/NVIDIA host, use the pinned CUDA procedure
+in [`../runbooks/C1_RISC0_CUDA_PROVING.md`](../runbooks/C1_RISC0_CUDA_PROVING.md).
+The `cuda-prover` Cargo feature is host-only: the runbook regenerates the guest
+and requires the reviewed image ID before starting the expensive proof. Its
+proving script also reopens the saved receipt, verifies it against the exact
+fixture, and records the receipt hash, environment, cycles, and timing needed
+for C1/C4 evidence.
+
 The experimental backend is an isolated Cargo workspace so its dependency and
 compiler lifecycle cannot silently increase the root protocol MSRV.
 The complete host adapter dependency graph was checked successfully with Rust

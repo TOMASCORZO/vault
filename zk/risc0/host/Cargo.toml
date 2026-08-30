@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Host-only opt-in for deliberately provisioned Linux/NVIDIA evidence runs.
+# This does not change the RISC-V guest or its reviewed image ID.
+cuda-prover = ["risc0-zkvm/cuda"]
+
 [dependencies]
 bincode.workspace = true
 risc0-zkvm = { workspace = true, features = ["bonsai", "prove", "disable-dev-mode"] }
@@ -23,4 +29,3 @@ vault-privacy = { path = "../../../crates/vault-privacy" }
 
 [lints]
 workspace = true
-

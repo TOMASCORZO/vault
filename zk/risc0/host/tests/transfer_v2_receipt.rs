@@ -221,6 +221,37 @@ fn proves_and_verifies_real_transfer_v2_receipt() -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+#[test]
+#[ignore = "verify an explicitly supplied saved C1 receipt"]
+fn verifies_saved_real_transfer_v2_receipt() -> Result<(), Box<dyn std::error::Error>> {
+    assert!(std::env::var_os("RISC0_DEV_MODE").is_none());
+    let path = std::env::var_os("VAULT_C1_RECEIPT_VERIFY_PATH").ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "VAULT_C1_RECEIPT_VERIFY_PATH must name the saved receipt",
+        )
+    })?;
+    let proof = std::fs::read(path)?;
+    let claim = deterministic_claim();
+    let native_journal = claim.validate().unwrap();
+    let effects = TransferV2Effects::decode_canonical(&claim.canonical_effects)?;
+
+    let verified = verify_transfer_v2(effects.public_inputs_digest(), &proof)?;
+    assert_eq!(verified, native_journal);
+
+    let mut wrong_digest = effects.public_inputs_digest().into_bytes();
+    wrong_digest[0] ^= 1;
+    assert!(matches!(
+        verify_transfer_v2(PublicInputDigest::new(wrong_digest), &proof),
+        Err(ZkBackendError::PublicInputMismatch)
+    ));
+
+    println!("guest_id={}", encode_hex(&REVIEWED_REFERENCE_GUEST_ID));
+    println!("public_inputs={}", effects.public_inputs_digest());
+    println!("proof_bytes={}", proof.len());
+    Ok(())
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

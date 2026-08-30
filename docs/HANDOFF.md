@@ -153,6 +153,15 @@ silently replaced or repeatedly started during normal M1 development:
 C7 remains external independent review. Do not mark C1, C4, C6, C7, or A5
 complete merely because implementation continues successfully on the M1.
 
+The branch now includes a host-only, opt-in `cuda-prover` feature and the
+fail-closed external-GPU procedure in
+`docs/runbooks/C1_RISC0_CUDA_PROVING.md`. Its scripts pin Ubuntu 22.04, CUDA
+12.4, host Rust 1.90.0, `rzup` 0.5.2, guest Rust 1.97.0, a clean checkout, and
+the reviewed guest image ID before proving. They generate, re-read, and verify
+the saved receipt and record a hash, environment report, and metrics. This
+procedure has not yet run on NVIDIA hardware and no C1 receipt exists; its
+presence does not change the status of C1 or C4.
+
 ## H1 scope correction
 
 Earlier development mixed three different meanings of "finish H1": cryptographic
