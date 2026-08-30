@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 bincode.workspace = true
-risc0-zkvm = { workspace = true, features = ["prove", "disable-dev-mode"] }
+risc0-zkvm = { workspace = true, features = ["bonsai", "prove", "disable-dev-mode"] }
 thiserror.workspace = true
 vault-protocol = { path = "../../../crates/vault-protocol" }
 vault-zk-accounting-core = { path = "../core" }

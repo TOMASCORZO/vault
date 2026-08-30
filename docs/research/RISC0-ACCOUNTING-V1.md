@@ -163,6 +163,26 @@ The quality script builds and tests the real guest first. It sets
 host compiler wrapper cannot compile the nested RISC-V standard library. Proof
 generation never sets that variable.
 
+For the opt-in transfer-v2 C1 receipt, a Bonsai account can replace the local
+CPU prover without changing the guest ELF, reviewed image ID, journal checks,
+or receipt verification. Keep credentials out of shell history and Git, export
+them only in the proving terminal, and run:
+
+```bash
+export BONSAI_API_URL="<account URL>"
+export BONSAI_API_KEY="<account key>"
+export RISC0_PROVER=bonsai
+export VAULT_C1_RECEIPT_PATH="/absolute/path/vault-c1-transfer-v2.receipt.bin"
+cargo test --release --manifest-path zk/risc0/Cargo.toml \
+  -p vault-zk-risc0 --test transfer_v2_receipt --locked -- \
+  --ignored --nocapture
+```
+
+The evidence fixture contains deterministic synthetic notes and keys. Real
+wallet witnesses must not be submitted to a third-party prover without a
+separate privacy, retention, and trust decision. Free or trial Bonsai access is
+account-dependent and is not assumed by this procedure.
+
 The experimental backend is an isolated Cargo workspace so its dependency and
 compiler lifecycle cannot silently increase the root protocol MSRV.
 The complete host adapter dependency graph was checked successfully with Rust
