@@ -3,6 +3,7 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host_toolchain="${VAULT_RISC0_HOST_TOOLCHAIN:-1.90.0}"
+pinned_cuda_release="12.8"
 minimum_vram_mib="${VAULT_CUDA_MIN_VRAM_MIB:-20000}"
 minimum_ram_mib="${VAULT_CUDA_MIN_RAM_MIB:-60000}"
 minimum_disk_gib="${VAULT_CUDA_MIN_DISK_GIB:-40}"
@@ -40,8 +41,8 @@ fi
 
 cuda_release="$(nvcc --version | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | tail -n 1)"
 [[ -n "$cuda_release" ]] || fail "could not determine the CUDA toolkit release"
-if [[ "$cuda_release" != "12.4" && "${VAULT_ALLOW_OTHER_CUDA:-0}" != "1" ]]; then
-  fail "CUDA 12.4 is pinned for this run; found $cuda_release"
+if [[ "$cuda_release" != "$pinned_cuda_release" && "${VAULT_ALLOW_OTHER_CUDA:-0}" != "1" ]]; then
+  fail "CUDA $pinned_cuda_release is pinned for this run; found $cuda_release"
 fi
 
 gpu_memory_mib="$(

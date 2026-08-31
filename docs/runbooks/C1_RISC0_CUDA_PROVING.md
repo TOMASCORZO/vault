@@ -20,7 +20,7 @@ Use one non-preemptible Linux x86_64 host with:
 - one NVIDIA A100 or H100 with 80 GiB VRAM;
 - at least 120 GiB system RAM and 16 vCPUs;
 - at least 100 GiB of free persistent SSD;
-- Ubuntu 22.04 with the CUDA 12.4.1 **development** toolkit (`nvcc` included);
+- Ubuntu 22.04 with the CUDA 12.8.1 **development** toolkit (`nvcc` included);
 - SSH access and billing that permits at least two uninterrupted hours.
 
 Do not select a runtime-only CUDA image, a spot/preemptible instance, or an
@@ -30,7 +30,7 @@ values above preserve build and proving margin.
 
 ## First 25 minutes: install the pinned tools
 
-Start from the provider's CUDA 12.4.1 development image. After the CUDA
+Start from the provider's CUDA 12.8.1 development image. After the CUDA
 preparation commit has been pushed, install `git`, clone the exact published
 branch, and run the idempotent setup script:
 
@@ -55,7 +55,7 @@ rzup show
 rustup run 1.90.0 rustc --version
 ```
 
-The expected versions are CUDA 12.4, `rzup 0.5.2`, host Rust 1.90.0, and RISC
+The expected versions are CUDA 12.8, `rzup 0.5.2`, host Rust 1.90.0, and RISC
 Zero guest Rust 1.97.0. Do not upgrade RISC Zero or regenerate the fixture with
 a different dependency lock during this evidence run.
 

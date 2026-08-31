@@ -156,7 +156,7 @@ complete merely because implementation continues successfully on the M1.
 The branch now includes a host-only, opt-in `cuda-prover` feature and the
 fail-closed external-GPU procedure in
 `docs/runbooks/C1_RISC0_CUDA_PROVING.md`. Its scripts pin Ubuntu 22.04, CUDA
-12.4, host Rust 1.90.0, `rzup` 0.5.2, guest Rust 1.97.0, a clean checkout, and
+12.8, host Rust 1.90.0, `rzup` 0.5.2, guest Rust 1.97.0, a clean checkout, and
 the reviewed guest image ID before proving. They generate, re-read, and verify
 the saved receipt and record a hash, environment report, and metrics. This
 procedure has not yet run on NVIDIA hardware and no C1 receipt exists; its
