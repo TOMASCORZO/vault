@@ -3,6 +3,7 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host_toolchain="${VAULT_RISC0_HOST_TOOLCHAIN:-1.90.0}"
+pinned_ubuntu_version="24.04"
 pinned_cuda_release="12.8"
 minimum_vram_mib="${VAULT_CUDA_MIN_VRAM_MIB:-20000}"
 minimum_ram_mib="${VAULT_CUDA_MIN_RAM_MIB:-60000}"
@@ -29,9 +30,9 @@ done
 
 os_id="$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"' | head -n 1)"
 os_version="$(sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '"' | head -n 1)"
-if [[ "$os_id" != "ubuntu" || "$os_version" != "22.04" ]]; then
+if [[ "$os_id" != "ubuntu" || "$os_version" != "$pinned_ubuntu_version" ]]; then
   [[ "${VAULT_ALLOW_OTHER_OS:-0}" == "1" ]] ||
-    fail "Ubuntu 22.04 is pinned; found ${os_id:-unknown} ${os_version:-unknown}"
+    fail "Ubuntu $pinned_ubuntu_version is pinned; found ${os_id:-unknown} ${os_version:-unknown}"
 fi
 
 if [[ "${VAULT_ALLOW_DIRTY_PROVING:-0}" != "1" ]]; then

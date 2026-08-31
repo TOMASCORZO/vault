@@ -20,7 +20,7 @@ Use one non-preemptible Linux x86_64 host with:
 - one NVIDIA A100 or H100 with 80 GiB VRAM;
 - at least 120 GiB system RAM and 16 vCPUs;
 - at least 100 GiB of free persistent SSD;
-- Ubuntu 22.04 with the CUDA 12.8.1 **development** toolkit (`nvcc` included);
+- Ubuntu 24.04 with the CUDA 12.8.1 **development** toolkit (`nvcc` included);
 - SSH access and billing that permits at least two uninterrupted hours.
 
 Do not select a runtime-only CUDA image, a spot/preemptible instance, or an
