@@ -14,7 +14,9 @@ use vault_zk_accounting_core::{
     AccountingClaim, AccountingJournal, PublicBurn, PublicOutput, ReferenceClaim, ReferenceJournal,
     TransferPublicFields, transfer_v2::TransferV2ReferenceClaim,
 };
-use vault_zk_accounting_methods::{VAULT_ZK_ACCOUNTING_GUEST_ELF, VAULT_ZK_ACCOUNTING_GUEST_ID};
+use vault_zk_accounting_methods::VAULT_ZK_ACCOUNTING_GUEST_ELF;
+#[cfg(test)]
+use vault_zk_accounting_methods::VAULT_ZK_ACCOUNTING_GUEST_ID;
 
 /// Reviewed guest image ID for the canonical `/workspace/vault` CUDA evidence build.
 ///
@@ -93,13 +95,22 @@ pub enum ZkBackendError {
     PublicInputMismatch,
 }
 
-/// Returns the canonical transfer circuit identifier derived from the guest image ID.
-#[must_use]
-pub fn activated_circuit_id() -> CircuitId {
+#[cfg(test)]
+fn compiled_guest_circuit_id() -> CircuitId {
     let digest = Digest::from(VAULT_ZK_ACCOUNTING_GUEST_ID);
     let mut bytes = [0_u8; 32];
     bytes.copy_from_slice(digest.as_bytes());
     CircuitId::new(bytes)
+}
+
+fn reviewed_guest_digest() -> Digest {
+    Digest::from(REVIEWED_REFERENCE_GUEST_ID)
+}
+
+/// Returns the canonical transfer circuit identifier approved for verification.
+#[must_use]
+pub fn activated_circuit_id() -> CircuitId {
+    CircuitId::new(REVIEWED_REFERENCE_GUEST_ID)
 }
 
 /// Converts the consensus envelope into the exact transcript recomputed by the guest.
@@ -152,7 +163,7 @@ pub fn prove(claim: &AccountingClaim) -> Result<ProofArtifact, ZkBackendError> {
     let elapsed_ms = started.elapsed().as_millis();
     prove_info
         .receipt
-        .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
+        .verify(reviewed_guest_digest())
         .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
 
     let journal: ReferenceJournal = prove_info
@@ -212,7 +223,7 @@ pub fn prove_transfer_v2(
     let elapsed_ms = started.elapsed().as_millis();
     prove_info
         .receipt
-        .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
+        .verify(reviewed_guest_digest())
         .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
 
     let journal: ReferenceJournal = prove_info
@@ -254,7 +265,7 @@ pub fn verify(
     let receipt: Receipt = bincode::deserialize(proof)
         .map_err(|error| ZkBackendError::ReceiptDecoding(error.to_string()))?;
     receipt
-        .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
+        .verify(reviewed_guest_digest())
         .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
     let journal: ReferenceJournal = receipt
         .journal
@@ -281,7 +292,7 @@ pub fn verify_transfer_v2(
     let receipt: Receipt = bincode::deserialize(proof)
         .map_err(|error| ZkBackendError::ReceiptDecoding(error.to_string()))?;
     receipt
-        .verify(VAULT_ZK_ACCOUNTING_GUEST_ID)
+        .verify(reviewed_guest_digest())
         .map_err(|error| ZkBackendError::ReceiptVerification(error.to_string()))?;
     let journal: ReferenceJournal = receipt
         .journal
@@ -367,10 +378,7 @@ mod tests {
 
     #[test]
     fn guest_image_id_changes_require_explicit_review() {
-        assert_eq!(
-            activated_circuit_id().into_bytes(),
-            REVIEWED_REFERENCE_GUEST_ID
-        );
+        assert_eq!(compiled_guest_circuit_id(), activated_circuit_id());
     }
 
     #[test]

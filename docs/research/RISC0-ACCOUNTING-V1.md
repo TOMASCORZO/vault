@@ -154,9 +154,12 @@ explicitly pinned to:
 
 The Linux guest, host, formatting, Clippy, rustdoc, native reference, and
 differential gates pass. A release CPU receipt attempt ran for roughly five
-hours before its WSL process was interrupted and left no receipt artifact.
-Consequently the real-receipt gate remains open; development-mode execution is
-not counted as a substitute.
+hours before its WSL process was interrupted and left no receipt artifact. On
+2026-08-31 the canonical CUDA procedure subsequently generated a real Composite
+receipt on an NVIDIA H100 and verified it twice against the reviewed image and
+fixture. See [`../evidence/C1_RISC0_CUDA_2026-08-31.md`](../evidence/C1_RISC0_CUDA_2026-08-31.md)
+for the exact artifact hash, environment, metrics, and remaining C4 publication
+work. Development-mode execution is not counted as a substitute.
 
 ## Reproduction
 

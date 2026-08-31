@@ -2,7 +2,7 @@
 
 **Status:** scope classification; no activation or production-readiness claim
 **Maturity:** production-intent
-**Last reconciled:** 2026-08-30
+**Last reconciled:** 2026-08-31
 
 This matrix freezes the remaining H1 work identified by `HANDOFF.md`. A newly
 discovered task does not expand H1 automatically. It must be assigned to one of
@@ -17,10 +17,10 @@ listed evidence. Passing these gates does not activate a verifier.
 
 | ID | Finite deliverable | Closure evidence | Status |
 |---|---|---|---|
-| C1 | Extend the isolated RISC Zero reference statement to transfer-v2 membership, ownership/spend authorization, nullifier derivation, note openings, output encryption consistency, gas, conservation, and exact burn. Remove prover-selected change classification. | Native negative tests for every invariant; a real receipt; journal/effects equality; differential vectors against the transparent oracle and Halo2 statement. | In progress, blocked only on real-receipt evidence: the complete typed statement, native negative matrix, journal/effects equality, differential vectors, Linux guest regeneration, host gates, and reviewed image ID are complete. The CPU receipt run was interrupted before completion and produced no artifact; no remote prover is currently available. |
+| C1 | Extend the isolated RISC Zero reference statement to transfer-v2 membership, ownership/spend authorization, nullifier derivation, note openings, output encryption consistency, gas, conservation, and exact burn. Remove prover-selected change classification. | Native negative tests for every invariant; a real receipt; journal/effects equality; differential vectors against the transparent oracle and Halo2 statement. | Complete at the implementation-evidence boundary: the typed statement, native negative matrix, journal/effects equality, differential vectors, Linux guest regeneration, host gates, reviewed image ID, and a real CUDA Composite receipt all passed. The receipt was verified immediately and again after reopening the saved artifact. See `evidence/C1_RISC0_CUDA_2026-08-31.md`. This does not activate the verifier or complete C4. |
 | C2 | Freeze the monolithic Halo2 transfer statement for every padded 2/4/8/16-action bucket, including exact effects and ciphertext bindings already implemented. | Reproducible proving/verifying keys or deterministic derivation, fixed suite ID, positive proof per bucket, and negative mutations for every public field and private classification boundary. | Complete: deterministic transparent `k = 15` derivation and suite ID `991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a` are pinned. Real release proofs verify for 2/4/8/16 actions; every public-instance cell is mutation-tested, and receiver/change, value-linkage, dummy, gas, burn, epoch-key, ciphertext, and complete-effects negative boundaries fail closed. |
 | C3 | Define proof-system setup and parameter assumptions. | Versioned specification naming transparent versus structured setup, parameter provenance, integrity identifiers, generation/reproduction procedure, toxic-waste assumptions, rotation, and activation/deactivation rules. | Specified in `architecture/PROOF_SETUP.md`; implementation evidence remains under C2/C4/A4. |
-| C4 | Publish real-proof positive and negative vectors for both backends. | Versioned manifest with hashes, exact toolchains, public inputs, expected acceptance/rejection, proof-size bounds, and an offline verifier. Large proof artifacts may be release artifacts when repository size policy forbids committing them. | In progress: the Halo2 half is published in `zk/halo2/core/tests/vectors` with all four real proofs, canonical public instances, SHA-256 manifest, exact 9,664-byte bound, and an offline positive/all-public-cell-negative verifier. The RISC Zero half remains blocked on the C1 real receipt. |
+| C4 | Publish real-proof positive and negative vectors for both backends. | Versioned manifest with hashes, exact toolchains, public inputs, expected acceptance/rejection, proof-size bounds, and an offline verifier. Large proof artifacts may be release artifacts when repository size policy forbids committing them. | In progress: the Halo2 half is published in `zk/halo2/core/tests/vectors`. A real RISC Zero positive receipt was generated, verified twice, copied locally, and hash-checked, but its 298 MiB artifact, canonical public inputs, negative cases, and portable offline-verifier package still require publication. See `evidence/C1_RISC0_CUDA_2026-08-31.md`. |
 | C5 | Decide epoch burn aggregation and low-volume privacy behavior without weakening conservation. | Normative design covering DKG trust, threshold shares, malicious/missing shares, validator rotation, minimum aggregate policy, low-volume carry/merge behavior, bounded recovery, supply-statistic update, and fail-closed activation. | Open |
 | C6 | Benchmark at least two maintained proof implementations on declared hardware. | Repeated measurements of key preparation/load, proving, verification, peak memory, proof size, concurrency, and all action buckets; dependency and maintenance review; documented selection or rejection. | Open |
 | C7 | Obtain independent cryptographic design review of the frozen statement, burn aggregation, setup assumptions, and vectors. | Versioned review report and disposition of every critical/high finding. This is externally blocked until C1-C6 are reviewable. | Blocked on C1-C6 |
@@ -28,8 +28,9 @@ listed evidence. Passing these gates does not activate a verifier.
 The Halo2 C2 closure freezes implementation shape and deterministic key
 identity; it does not publish C4 release vectors, satisfy C6 comparative
 benchmarking, provide C7 independent review, or activate a verifier. The RISC
-Zero transfer-v2 statement is implemented, but C1 remains open until a real
-receipt verifies against its reviewed image and journal.
+Zero transfer-v2 statement and real-receipt evidence complete C1. That result
+does not publish the remaining C4 vector package, satisfy C6 comparative
+benchmarking, provide C7 independent review, or activate a verifier.
 
 ## H1 activation hardening
 

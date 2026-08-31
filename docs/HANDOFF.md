@@ -1,6 +1,6 @@
 # Vault Project Handoff
 
-**Updated:** 2026-08-30
+**Updated:** 2026-08-31
 **Current milestone:** H1 — private-transfer production foundation  
 **Maturity:** production-intent, unaudited, not activated, not safe for real funds
 
@@ -89,9 +89,12 @@ The external CUDA build subsequently exposed absolute source paths in RISC Zero
 3.0.6 guest panic metadata, so the canonical `/workspace/vault` evidence build
 is pinned to reviewed transfer-v2 image ID
 `85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128`.
-A real local CPU receipt run was interrupted after roughly five hours and
-produced no receipt artifact; remote proving is unavailable. C1 therefore
-remains open only on real-receipt evidence.
+On 2026-08-31 an NVIDIA H100 80 GB CUDA 12.8 run generated a real 311,977,650-byte
+Composite receipt in 1,329,338 ms for 1,162,870,784 total cycles. It verified
+immediately and again after reopening the saved artifact; the local copy's
+SHA-256 matches the remote manifest. C1 is complete at the
+implementation-evidence boundary. Exact provenance and remaining limitations
+are recorded in `docs/evidence/C1_RISC0_CUDA_2026-08-31.md`.
 
 C2 is complete at the implementation-evidence boundary. The monolithic Halo2
 2/4/8/16-action shapes use deterministic transparent parameters at `k = 15`
@@ -102,12 +105,13 @@ of every two-action public-instance cell and the private classification/value
 negative matrix. This does not close C4 vectors, C6 comparative benchmarks, C7
 review, or verifier activation.
 
-The Halo2 half of C4 is now committed under
+The Halo2 half of C4 is committed under
 `zk/halo2/core/tests/vectors`: four 9,664-byte real proofs, canonical public
 instances, a SHA-256/toolchain manifest, deterministic reproduction, and an
 offline verifier that rejects a changed proof byte and every public-instance
-cell mutation. C4 remains in progress because the RISC Zero vector depends on
-the missing C1 real receipt.
+cell mutation. C4 remains in progress because the large RISC Zero receipt and
+its canonical public-input/negative-vector offline package are not yet
+published, although the positive receipt now exists and has been verified.
 
 The latest Halo2 gate on the Windows Ryzen host passed formatting, workspace
 check, Clippy with warnings denied, rustdoc, 22 release library tests, and two
@@ -139,20 +143,19 @@ M1. Work that is safe and useful on the M1 includes C5's normative burn
 aggregation/low-volume design, C4/C6 tooling and documentation, ordinary Rust
 tests, and the applicable A1-A4 hardening tasks.
 
-Two heavy evidence items are still genuinely open, but neither should be
+Two evidence items are still genuinely open, but neither should be
 silently replaced or repeatedly started during normal M1 development:
 
-1. C1/C4 need one real RISC Zero transfer-v2 receipt and its published vector.
-   The Ryzen CPU attempt ran for roughly five hours before interruption and
-   produced no artifact. Development-mode execution is not a receipt. Run this
-   only when a maintained remote prover or a deliberately provisioned proving
-   machine is available.
+1. C4 needs publication of the existing RISC Zero receipt as a versioned release
+   artifact together with canonical public inputs, negative cases, proof-size
+   bounds, and a portable offline verifier. Do not restart proving merely to do
+   this packaging work.
 2. C6 needs a planned repeated comparative benchmark of at least two maintained
    proof implementations, including peak memory, concurrency, and all buckets.
    The existing Ryzen measurements are engineering evidence, not that final
    benchmark. It can be scheduled later on declared comparable hardware.
 
-C7 remains external independent review. Do not mark C1, C4, C6, C7, or A5
+C7 remains external independent review. Do not mark C4, C6, C7, or A5
 complete merely because implementation continues successfully on the M1.
 
 The branch now includes a host-only, opt-in `cuda-prover` feature and the
@@ -161,8 +164,10 @@ fail-closed external-GPU procedure in
 12.8, host Rust 1.90.0, `rzup` 0.5.2, guest Rust 1.97.0, a clean checkout, and
 the reviewed guest image ID before proving. They generate, re-read, and verify
 the saved receipt and record a hash, environment report, and metrics. This
-procedure has not yet run on NVIDIA hardware and no C1 receipt exists; its
-presence does not change the status of C1 or C4.
+procedure completed on an NVIDIA H100. It produced the C1 receipt documented in
+`docs/evidence/C1_RISC0_CUDA_2026-08-31.md`; C1 is complete at the
+implementation-evidence boundary, while C4 remains open on publication and
+negative-vector packaging.
 
 ## H1 scope correction
 
@@ -211,11 +216,11 @@ cryptographic scope.
 > Open `/Users/tomascorzo/vault`, fetch origin, switch to
 > `codex/c1-transfer-v2`, and pull with `--ff-only`. Read `AGENTS.md` and every
 > document it requires, especially `docs/HANDOFF.md` and
-> `docs/H1_CLOSURE_MATRIX.md`. Preserve C2 as complete and C4 as in progress,
-> with only its Halo2 half complete. C1/C4 remain blocked on a real RISC Zero
-> receipt; do not substitute dev mode or automatically restart the multi-hour
-> CPU prover.
-> Continue the next locally actionable bounded item, normally C5, while keeping
-> C1-C7 separate from A1-A5 and H2. Do not create prototypes, expand H1 with
+> `docs/H1_CLOSURE_MATRIX.md`. Preserve C1 and C2 as complete at their
+> implementation-evidence boundaries and C4 as in progress. The real RISC Zero
+> receipt already exists locally with its hash and provenance recorded; do not
+> restart proving. Complete C4 publication/negative-vector packaging or continue
+> the next locally actionable bounded item, normally C5, while keeping C1-C7
+> separate from A1-A5 and H2. Do not create prototypes, expand H1 with
 > H2/mainnet work, start contracts, use real funds, or claim production
 > readiness.

@@ -25,6 +25,7 @@ receipt_path="${1:-}"
 }
 
 cd "$repository_root/zk/risc0"
+export RISC0_SKIP_BUILD=1
 VAULT_C1_RECEIPT_VERIFY_PATH="$receipt_path" \
   cargo +"$host_toolchain" test \
   --release \
