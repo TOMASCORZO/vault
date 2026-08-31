@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="${HOME}/.cargo/bin:${PATH}"
+
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host_toolchain="${VAULT_RISC0_HOST_TOOLCHAIN:-1.90.0}"
 receipt_path="${1:-}"
