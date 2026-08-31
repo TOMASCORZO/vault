@@ -84,9 +84,11 @@ openings, Merkle membership, public nullifiers, `ak + alpha`, net-value
 commitments, exact encrypted outputs, receiver-derived classification, gas,
 conservation, ceiling burn, its commitment, and its threshold-ElGamal
 ciphertext. Linux guest compilation, host tests, strict Clippy/rustdoc, positive
-and burn-evasion differentials, and repeated image-ID reproduction passed. The
-reviewed transfer-v2 image ID is
-`cb95069bf50d37a3e6a9f0fd1519a5676d634c28c6f5a59a335511427cadd032`.
+and burn-evasion differentials, and repeated WSL image-ID reproduction passed.
+The external CUDA build subsequently exposed absolute source paths in RISC Zero
+3.0.6 guest panic metadata, so the canonical `/workspace/vault` evidence build
+is pinned to reviewed transfer-v2 image ID
+`85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128`.
 A real local CPU receipt run was interrupted after roughly five hours and
 produced no receipt artifact; remote proving is unavailable. C1 therefore
 remains open only on real-receipt evidence.

@@ -136,11 +136,20 @@ MSVC: upstream native circuit crates invoke generated C++20 constructs with
 `/std:c++17`, and the methods build script encounters an unresolved zkVM
 platform allocation symbol. No local security or verifier patch was introduced.
 WSL 2.7.1 and Ubuntu are installed on the Windows Ryzen host. The pinned Linux
-guest toolchain compiled the transfer-v2 guest twice to the same reviewed image
-ID:
+guest toolchain compiled the transfer-v2 guest twice to the same WSL image ID:
 
 ```text
 cb95069bf50d37a3e6a9f0fd1519a5676d634c28c6f5a59a335511427cadd032
+```
+
+The later CUDA evidence build showed that RISC Zero 3.0.6 retains absolute Rust
+source paths in guest panic metadata. The WSL ID is therefore reproducible only
+inside that build root, not portable across checkout paths. With guest source
+and lockfiles unchanged, the canonical `/workspace/vault` external build is
+explicitly pinned to:
+
+```text
+85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128
 ```
 
 The Linux guest, host, formatting, Clippy, rustdoc, native reference, and

@@ -23,6 +23,8 @@ require_command() {
 
 [[ "$(uname -s)" == "Linux" ]] || fail "the evidence run requires Linux"
 [[ "$(uname -m)" == "x86_64" ]] || fail "the evidence run requires x86_64"
+[[ "$repository_root" == "/workspace/vault" ]] ||
+  fail "the reviewed guest requires the canonical checkout path /workspace/vault"
 [[ -z "${RISC0_DEV_MODE+x}" ]] || fail "RISC0_DEV_MODE must be unset"
 [[ "$selected_gpu" != *,* ]] || fail "select exactly one CUDA device"
 

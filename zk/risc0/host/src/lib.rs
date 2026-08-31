@@ -16,13 +16,15 @@ use vault_zk_accounting_core::{
 };
 use vault_zk_accounting_methods::{VAULT_ZK_ACCOUNTING_GUEST_ELF, VAULT_ZK_ACCOUNTING_GUEST_ID};
 
-/// Reviewed guest image ID for the versioned accounting-v1/transfer-v2 build.
+/// Reviewed guest image ID for the canonical `/workspace/vault` CUDA evidence build.
 ///
-/// Two clean Linux regenerations produced these exact bytes. CI deliberately
-/// fails if the compiled guest changes without another explicit review.
+/// RISC Zero 3.0.6 embeds absolute Rust source paths in this guest's panic
+/// metadata, so the earlier WSL image ID is not portable to a different
+/// checkout root. CI deliberately fails if this pinned build changes without
+/// another explicit review.
 pub const REVIEWED_REFERENCE_GUEST_ID: [u8; 32] = [
-    203, 149, 6, 155, 245, 13, 55, 163, 230, 169, 240, 253, 21, 25, 165, 103, 109, 99, 76, 40, 198,
-    245, 165, 154, 51, 85, 17, 66, 124, 173, 208, 50,
+    133, 23, 15, 17, 68, 95, 16, 186, 155, 38, 228, 202, 150, 242, 150, 0, 254, 78, 48, 65, 0, 129,
+    144, 95, 81, 154, 153, 68, 157, 210, 209, 40,
 ];
 
 /// Proof-generation measurements captured on the local machine.

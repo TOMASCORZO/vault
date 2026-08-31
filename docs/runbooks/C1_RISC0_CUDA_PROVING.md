@@ -6,12 +6,15 @@
 
 **Pinned backend:** RISC Zero 3.0.6, Composite receipt
 **Reviewed guest ID:**
-`cb95069bf50d37a3e6a9f0fd1519a5676d634c28c6f5a59a335511427cadd032`
+`85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128`
 
 This runbook produces one receipt for Vault's deterministic synthetic
 transfer-v2 evidence fixture. It must not be used with wallet data or real
 funds. Completion supplies C1 evidence; it does not activate a verifier or
 close C4 until the resulting artifact is published with its negative vectors.
+The checkout path `/workspace/vault` is part of the pinned build environment:
+RISC Zero 3.0.6 preserves absolute Rust source paths in panic metadata, which
+changes the image ID without changing guest logic.
 
 ## Rent this host
 
