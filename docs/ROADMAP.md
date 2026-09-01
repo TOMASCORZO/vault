@@ -44,7 +44,7 @@ later milestones do not expand H1 cryptographic implementation.
   and transaction effects (circuit ownership binding remains pending).
 - [x] Implement an accounting-only reference statement in a maintained zkVM.
 - [x] Generate, verify, and benchmark one real fail-closed RISC Zero receipt.
-- [ ] Extend the reference statement with membership, authorization,
+- [x] Extend the reference statement with membership, authorization,
   nullifiers, note openings, and encryption consistency.
 - [x] Specify and implement transfer-v2 actions using canonical
   `vault-privacy` commitments, value commitments, and fixed-size ciphertexts.
@@ -132,7 +132,7 @@ later milestones do not expand H1 cryptographic implementation.
   both use transparent parameter generation, while reproducible artifact and
   activation evidence remains gated by the H1 closure matrix.
 - [x] Publish the first deterministic envelope transcript vector.
-- [ ] Publish real-proof positive and negative test vectors for both backends.
+- [x] Publish real-proof positive and negative test vectors for both backends.
 - Design epoch burn aggregation and low-volume privacy handling.
 
 **Exit criterion:** reproducible proofs verify all invariants; no production or

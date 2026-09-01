@@ -287,8 +287,11 @@ benchmarks.
 The corresponding C4 Halo2 proof and public-instance artifacts, SHA-256
 manifest, reproduction procedure, and offline mutation verifier are published
 under [`../../zk/halo2/core/tests/vectors`](../../zk/halo2/core/tests/vectors/VERIFY.md).
-This is only the Halo2 half of C4; the RISC Zero half cannot be published until
-the C1 real receipt exists.
+The RISC Zero half is published separately in release
+[`c4-risc0-transfer-v2-v1`](https://github.com/TOMASCORZO/vault/releases/tag/c4-risc0-transfer-v2-v1),
+with its committed manifest and offline mutation verifier under
+[`../../zk/risc0/host/tests/vectors`](../../zk/risc0/host/tests/vectors/VERIFY.md).
+Together these packages complete C4 without activating either backend.
 
 ## Fail-closed composition
 
