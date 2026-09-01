@@ -1,6 +1,11 @@
 name: c6-risc0-cuda-prebuild
 
 on:
+  push:
+    branches:
+      - codex/c1-transfer-v2
+    paths:
+      - .github/workflows/c6-risc0-cuda-prebuild.yml
   workflow_dispatch:
 
 permissions:
