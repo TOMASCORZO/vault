@@ -1,0 +1,85 @@
+{
+  "schema": "vault.risc0.transfer-v2-receipt-vectors",
+  "version": 1,
+  "status": "production-intent; non-activatable",
+  "generated_at": "2026-08-31",
+  "source_commit": "d300b17e31410f4c9c9a87f49b6029ac706f0141",
+  "release": {
+    "repository": "TOMASCORZO/vault",
+    "tag": "c4-risc0-transfer-v2-v1",
+    "receipt_url": "https://github.com/TOMASCORZO/vault/releases/download/c4-risc0-transfer-v2-v1/vault-c1-transfer-v2.receipt.bin"
+  },
+  "backend": {
+    "risc0_zkvm": "3.0.6",
+    "receipt_format": "Composite",
+    "host_rust": "1.90.0",
+    "guest_rust": "1.97.0",
+    "rzup": "0.5.2",
+    "cuda": "12.8",
+    "target": "x86_64-unknown-linux-gnu"
+  },
+  "hardware": {
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "system_memory_mib": 1032044
+  },
+  "statement": {
+    "name": "vault transfer-v2 deterministic synthetic fixture",
+    "reviewed_guest_id": "85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128",
+    "public_input_encoding": "canonical TransferV2Effects public-input digest, 32 bytes",
+    "public_inputs_digest": "ad626fcc1292ab423bdfc773c568662c02aecd83f9b29481ea040a236b909454",
+    "expected_journal": {
+      "action_count": 2,
+      "gas_fee": 26
+    }
+  },
+  "receipt": {
+    "file": "vault-c1-transfer-v2.receipt.bin",
+    "bytes_exact": 311977650,
+    "sha256": "12c952e2da0466d7047586404b15c7ad6fa59675bb8c975019b4645dca7e6e96",
+    "expected": "accept"
+  },
+  "proof_size_bound": {
+    "published_vector_bytes_exact": 311977650,
+    "vault_protocol_max_proof_bytes": 2097152,
+    "activation_compatible": false,
+    "reason": "the reference Composite receipt exceeds the current consensus-envelope denial-of-service limit"
+  },
+  "negative_vectors": [
+    {
+      "mutation": "xor 0x01 into public_inputs_digest[0]",
+      "expected": "reject with PublicInputMismatch"
+    },
+    {
+      "mutation": "xor 0x01 at receipt[floor(receipt_length/2)]",
+      "expected": "reject"
+    },
+    {
+      "mutation": "remove the final receipt byte",
+      "expected": "reject"
+    }
+  ],
+  "metrics": {
+    "proving_elapsed_ms": 1329338,
+    "segments": 1109,
+    "total_cycles": 1162870784,
+    "user_cycles": 1032338164,
+    "saved_receipt_verification_seconds": 47.15
+  },
+  "auxiliary_release_assets": [
+    {
+      "file": "vault-c1-transfer-v2.receipt.bin.environment.txt",
+      "bytes": 777,
+      "sha256": "cb419480b63856041f469050e11b73da4bbedb56faedbe1583fc1e9121e4a0a7"
+    },
+    {
+      "file": "vault-c1-transfer-v2.receipt.bin.log",
+      "bytes": 10176,
+      "sha256": "22ac0fc8a41f4785c090644a22ea7e14b4155fa351aa4c07ead73a8a68ad8932"
+    },
+    {
+      "file": "vault-c1-transfer-v2.receipt.bin.manifest.txt",
+      "bytes": 461,
+      "sha256": "d7a8c96dfc3451e4ab195d4cff3181bb044b2a1ac39d4c8bc72c63c4f0328d43"
+    }
+  ]
+}

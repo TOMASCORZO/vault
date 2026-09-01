@@ -1,4 +1,4 @@
-//! Expensive, opt-in C1 evidence: prove and verify one real transfer-v2 receipt.
+//! Opt-in C1 proving and C4 offline-vector verification for transfer-v2.
 
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
@@ -28,6 +28,8 @@ use vault_zk_risc0::{
 };
 
 const NETWORK: [u8; 32] = [0x31; 32];
+const C4_RECEIPT_BYTES: usize = 311_977_650;
+const C4_PUBLIC_INPUTS: &str = "ad626fcc1292ab423bdfc773c568662c02aecd83f9b29481ea040a236b909454";
 
 fn nullifier(byte: u8) -> ActionNullifier {
     ActionNullifier::from_bytes([byte; 32]).unwrap()
@@ -222,19 +224,24 @@ fn proves_and_verifies_real_transfer_v2_receipt() -> Result<(), Box<dyn std::err
 }
 
 #[test]
-#[ignore = "verify an explicitly supplied saved C1 receipt"]
-fn verifies_saved_real_transfer_v2_receipt() -> Result<(), Box<dyn std::error::Error>> {
+#[ignore = "verify the explicitly supplied published C4 receipt vector"]
+fn published_risc0_vector_verifies_offline_and_rejects_mutations()
+-> Result<(), Box<dyn std::error::Error>> {
     assert!(std::env::var_os("RISC0_DEV_MODE").is_none());
-    let path = std::env::var_os("VAULT_C1_RECEIPT_VERIFY_PATH").ok_or_else(|| {
+    let path = std::env::var_os("VAULT_C4_RECEIPT_VERIFY_PATH").ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "VAULT_C1_RECEIPT_VERIFY_PATH must name the saved receipt",
+            "VAULT_C4_RECEIPT_VERIFY_PATH must name the published receipt",
         )
     })?;
-    let proof = std::fs::read(path)?;
+    let mut proof = std::fs::read(path)?;
+    assert_eq!(proof.len(), C4_RECEIPT_BYTES);
     let claim = deterministic_claim();
     let native_journal = claim.validate().unwrap();
     let effects = TransferV2Effects::decode_canonical(&claim.canonical_effects)?;
+    assert_eq!(effects.public_inputs_digest().to_string(), C4_PUBLIC_INPUTS);
+    assert_eq!(native_journal.action_count, 2);
+    assert_eq!(native_journal.gas_fee, 26);
 
     let verified = verify_transfer_v2(effects.public_inputs_digest(), &proof)?;
     assert_eq!(verified, native_journal);
@@ -245,6 +252,12 @@ fn verifies_saved_real_transfer_v2_receipt() -> Result<(), Box<dyn std::error::E
         verify_transfer_v2(PublicInputDigest::new(wrong_digest), &proof),
         Err(ZkBackendError::PublicInputMismatch)
     ));
+
+    let mutation_index = proof.len() / 2;
+    proof[mutation_index] ^= 0x01;
+    assert!(verify_transfer_v2(effects.public_inputs_digest(), &proof).is_err());
+    proof[mutation_index] ^= 0x01;
+    assert!(verify_transfer_v2(effects.public_inputs_digest(), &proof[..proof.len() - 1]).is_err());
 
     println!("guest_id={}", encode_hex(&REVIEWED_REFERENCE_GUEST_ID));
     println!("public_inputs={}", effects.public_inputs_digest());

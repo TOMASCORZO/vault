@@ -53,14 +53,14 @@ cd "$repository_root/zk/risc0"
 
 [[ -s "$receipt_path" ]] || fail "the test completed without a non-empty receipt"
 
-VAULT_C1_RECEIPT_VERIFY_PATH="$receipt_path" \
+VAULT_C4_RECEIPT_VERIFY_PATH="$receipt_path" \
   cargo +"$host_toolchain" test \
   --release \
   --locked \
   -p vault-zk-risc0 \
   --features cuda-prover \
   --test transfer_v2_receipt \
-  verifies_saved_real_transfer_v2_receipt \
+  published_risc0_vector_verifies_offline_and_rejects_mutations \
   -- \
   --ignored \
   --exact \

@@ -24,18 +24,5 @@ receipt_path="${1:-}"
   exit 1
 }
 
-cd "$repository_root/zk/risc0"
-export RISC0_SKIP_BUILD=1
-VAULT_C1_RECEIPT_VERIFY_PATH="$receipt_path" \
-  cargo +"$host_toolchain" test \
-  --release \
-  --locked \
-  -p vault-zk-risc0 \
-  --test transfer_v2_receipt \
-  verifies_saved_real_transfer_v2_receipt \
-  -- \
-  --ignored \
-  --exact \
-  --nocapture
-
-sha256sum "$receipt_path"
+VAULT_RISC0_HOST_TOOLCHAIN="$host_toolchain" \
+  exec "$repository_root/scripts/verify-zk-risc0-c4-vector.sh" "$receipt_path"
