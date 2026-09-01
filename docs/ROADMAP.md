@@ -133,7 +133,7 @@ later milestones do not expand H1 cryptographic implementation.
   activation evidence remains gated by the H1 closure matrix.
 - [x] Publish the first deterministic envelope transcript vector.
 - [x] Publish real-proof positive and negative test vectors for both backends.
-- Design epoch burn aggregation and low-volume privacy handling.
+- [x] Design epoch burn aggregation and low-volume privacy handling.
 
 **Exit criterion:** reproducible proofs verify all invariants; no production or
 security claim is made.

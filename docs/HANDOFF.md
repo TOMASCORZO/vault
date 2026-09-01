@@ -116,6 +116,14 @@ altered proof byte, and truncation in 74.57 seconds. C4 is complete. The
 311,977,650-byte receipt exceeds Vault's 2,097,152-byte consensus proof limit,
 so this evidence does not make the RISC Zero backend activatable.
 
+C5 is complete at the specification boundary. The normative policy in
+`docs/specs/BURN_AGGREGATION_V1.md` freezes the greater-than-two-thirds DKG
+threshold, deterministic collection windows, 256-ciphertext/64-block disclosure
+floor, indefinite low-volume carry under same-key validator resharing, verified
+share selection, bounded recovery/stall behavior, and monotonic public supply
+upper-bound updates. The network DKG, persistence, recovery implementation, and
+activation remain H2/A4/A5 work rather than reopening C5.
+
 The latest Halo2 gate on the Windows Ryzen host passed formatting, workspace
 check, Clippy with warnings denied, rustdoc, 22 release library tests, and two
 real-proof integration tests. This includes real 2/4/8/16-action proofs, the
@@ -142,8 +150,7 @@ heavy evidence needed for the current implementation step:
   and release-test gates.
 
 No additional test on this Ryzen machine blocks continued implementation on the
-M1. Work that is safe and useful on the M1 includes C5's normative burn
-aggregation/low-volume design, C6 tooling and documentation, ordinary Rust
+M1. Work that is safe and useful on the M1 includes C6 tooling and documentation, ordinary Rust
 tests, and the applicable A1-A4 hardening tasks.
 
 One cryptographic evidence item is still genuinely open:
@@ -191,8 +198,8 @@ continue that pattern.
 Before further implementation, reconcile the unchecked H1 roadmap entries into a
 finite closure matrix using those four classifications. In particular, resolve the
 remaining reference-statement constraints, trusted-setup assumptions if any,
-real-proof positive and negative vectors, burn aggregation/low-volume privacy, and
-review/benchmark gates without treating later consensus integration as new H1
+real-proof positive and negative vectors and benchmark gates without treating
+later consensus integration as new H1
 cryptographic scope.
 
 ## Non-negotiable handoff rules
@@ -215,10 +222,10 @@ cryptographic scope.
 > Open `/Users/tomascorzo/vault`, fetch origin, switch to
 > `codex/c1-transfer-v2`, and pull with `--ff-only`. Read `AGENTS.md` and every
 > document it requires, especially `docs/HANDOFF.md` and
-> `docs/H1_CLOSURE_MATRIX.md`. Preserve C1 and C2 as complete at their
-> implementation-evidence boundaries and C4 as complete. The real RISC Zero
+> `docs/H1_CLOSURE_MATRIX.md`. Preserve C1, C2, C4, and C5 as complete at their
+> stated boundaries. The real RISC Zero
 > receipt is published in release `c4-risc0-transfer-v2-v1`; do not restart
-> proving. Continue the next locally actionable bounded item, normally C5 or C6,
+> proving. Continue the next locally actionable bounded item, normally C6,
 > while keeping C1-C6 separate from A1-A5 and H2. Do not create prototypes,
 > expand H1 with
 > H2/mainnet work, start contracts, use real funds, or claim production

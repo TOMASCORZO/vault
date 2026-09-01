@@ -198,10 +198,12 @@ epoch-scoped threshold validator key:
 5. missed threshold shares trigger a defined recovery/liveness path, never a
    bypass of supply conservation.
 
-This design remains open because distributed key generation, validator-set
-rotation, low-volume epochs, and malicious decryption shares add substantial
-risk. Until resolved, exact circulating-supply publication is not a guaranteed
-H1 property; non-inflation remains enforced by transaction proofs.
+The normative policy for DKG trust, same-key validator resharing, low-volume
+carry, verified decryption shares, bounded recovery, and supply reporting is
+frozen in [`../specs/BURN_AGGREGATION_V1.md`](../specs/BURN_AGGREGATION_V1.md).
+Its network and persistence implementation remains open. Until it is activated,
+exact circulating-supply publication is not guaranteed; non-inflation remains
+enforced by transaction proofs.
 
 ## 6. Network and endpoint privacy
 

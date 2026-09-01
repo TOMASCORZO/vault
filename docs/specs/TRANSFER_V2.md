@@ -257,9 +257,11 @@ accepting a retired key. Ciphertexts aggregate by component-wise point addition.
 The implementation validates keys, encrypts, parses, aggregates, produces and
 verifies Chaum-Pedersen/DLEQ decryption shares, interpolates an exact threshold
 subset, and proves the two per-transfer ciphertext equations against the exact
-descriptor-derived epoch key. DKG, share-publication consensus, bounded
-aggregate discrete-log recovery, rotation, low-volume policy, and activation
-of the final verifier remain blockers.
+descriptor-derived epoch key. The aggregation, rotation, low-volume,
+bounded-recovery, and supply-report rules are specified in
+[`BURN_AGGREGATION_V1.md`](BURN_AGGREGATION_V1.md). DKG, share-publication
+consensus, recovery implementation, and activation of the final verifier remain
+blockers.
 
 Arbitrary 64-byte payloads are not valid merely because they parse. For this
 scheme ID the codec requires two canonical Pallas points and non-identity `C1`;

@@ -1,22 +1,26 @@
 # Hidden burn encryption
 
-**Status:** production-intent native construction implemented; circuit and
-threshold lifecycle incomplete; not activatable  
-**Last updated:** 2026-08-22  
+**Status:** production-intent native construction and aggregation policy
+specified; threshold lifecycle implementation incomplete; not activatable
+**Last updated:** 2026-08-31
 **Code:** `crates/vault-burn`
 
 ## Purpose and privacy boundary
 
 Publishing a burn amount reveals the approximate private payment amount because
 Vault burns `ceil(payment / 200)`. Vault therefore encrypts each burn, aggregates
-ciphertexts through an epoch, and intends to decrypt only the aggregate after a
-minimum anonymity threshold.
+ciphertexts through an epoch, and decrypts only after the minimum disclosure
+floors in the aggregation policy.
 
 Threshold encryption is not absolute privacy. A threshold of validators can
 collude to decrypt an individual transaction, and a low-volume epoch can make an
-aggregate identifying. The validator-corruption assumption, minimum aggregate
-cardinality/value policy, epoch delay, and network metadata defenses must be
+aggregate identifying. The validator-corruption assumption, minimum disclosure
+policy, epoch delay, and network metadata defenses must be
 part of any privacy claim.
+
+The normative collection, same-key reshare, low-volume carry, recovery, and
+supply-report policy is frozen in
+[`../specs/BURN_AGGREGATION_V1.md`](../specs/BURN_AGGREGATION_V1.md).
 
 ## Frozen candidate construction
 
@@ -124,17 +128,17 @@ Implemented:
 - Halo2 gadget proving the burn commitment, `C1`, and `C2` equations from the
   exact same range-constrained burn cell produced by the 0.5% arithmetic;
 
-Still mandatory:
+Still mandatory for activation:
 
-- audited DKG, complaints, resharing, validator rotation, and transcript format;
+- DKG, complaints, resharing, validator rotation, and transcript format;
 - secret-share storage and erasure policy;
 - consensus publication, finality, and equivocation rules for decryption shares;
-- minimum-anonymity and timeout behavior;
-- bounded discrete-log recovery and independent aggregate verification;
+- implementation of the specified accumulator, disclosure floors, same-key
+  reshare, timeout, and stalled-state behavior;
+- bounded discrete-log recovery and deterministic aggregate verification;
 - integration of the gadget into the final note/value/change-classification
   statement and its reviewed verifying key;
-- adversarial, side-channel, fuzz, benchmark, and independent cryptography
-  reviews.
+- adversarial, side-channel, fuzz, benchmark, and project security reviews.
 
 Until these are complete, this scheme ID must not appear in an activated state
 configuration.
