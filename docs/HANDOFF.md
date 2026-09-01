@@ -155,11 +155,12 @@ tests, and the applicable A1-A4 hardening tasks.
 
 One cryptographic evidence item is still genuinely open:
 
-1. C6 still needs persistent Halo2 key-load measurement and the prepared RISC
-   Zero Succinct decision run. If Succinct fails the hard proof-size bound, the
-   RISC Zero branch ends by documented rejection. If it fits, repeated
-   2/4/8/16-action RISC Zero memory and concurrency measurements remain before
-   comparative closure.
+1. C6 needs the prepared RISC Zero Succinct classification run and final
+   selection record. RISC Zero 3.0.6 is already rejected for direct base-layer
+   selection by its Composite size and resolved advisory blockers, so repeated
+   2/4/8/16-action and concurrency rentals are not required. Stable Halo2
+   parameter/key serialization and cold-load measurement belong to A4 release
+   engineering.
 
 Do not mark C6 or A5 complete merely because implementation continues
 successfully on the M1. External audit is optional and is not a closure gate;
@@ -187,6 +188,14 @@ repeating base proving. It verifies the same reviewed guest and journal,
 reopens the output, rejects mutations, and records VRAM, host RSS, time, size,
 and the 2 MiB compatibility decision. This compression has not been run; do not
 report a Succinct size or C6 closure until external evidence exists.
+
+To minimize rental cost, the repository also contains a manual GitHub Actions
+workflow that prebuilds the exact CUDA integration-test binary at the canonical
+source path. The rented host must not clone the repository, install Rust or
+compile: it downloads the prebuilt bundle and the published Composite receipt,
+runs the fail-closed preflight and compression, copies five evidence files, and
+is then destroyed. The optimized commands and 30 GiB disk profile are frozen in
+the C6 runbook.
 
 ## H1 scope correction
 

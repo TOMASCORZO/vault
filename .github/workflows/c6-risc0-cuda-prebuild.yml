@@ -1,0 +1,110 @@
+name: c6-risc0-cuda-prebuild
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: nvidia/cuda:12.8.1-devel-ubuntu24.04
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            curl \
+            git \
+            jq \
+            libclang-dev \
+            libssl-dev \
+            ninja-build \
+            pkg-config \
+            protobuf-compiler
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchains
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --profile minimal --default-toolchain none
+          export PATH="${HOME}/.cargo/bin:${PATH}"
+          rustup toolchain install 1.90.0 --profile minimal
+          cargo +1.90.0 install rzup --version 0.5.2 --locked \
+            --no-default-features --features cli,install
+          rzup install rust 1.97.0
+      - name: Build canonical CUDA test bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.cargo/bin:${PATH}"
+          mkdir -p /workspace
+          cp -a "${GITHUB_WORKSPACE}" /workspace/vault
+          cd /workspace/vault/zk/risc0
+
+          cargo +1.90.0 test --release --locked \
+            -p vault-zk-risc0 \
+            --features cuda-prover \
+            --lib guest_image_id_changes_require_explicit_review \
+            -- --exact --nocapture
+
+          cargo +1.90.0 test --release --locked \
+            -p vault-zk-risc0 \
+            --features cuda-prover \
+            --test transfer_v2_receipt \
+            --no-run \
+            --message-format=json > /tmp/c6-cargo-messages.json
+
+          test_binary="$(
+            jq -r \
+              'select(.reason == "compiler-artifact" and .target.name == "transfer_v2_receipt" and .executable != null) | .executable' \
+              /tmp/c6-cargo-messages.json |
+              tail -n 1
+          )"
+          [[ -n "$test_binary" && -x "$test_binary" ]]
+
+          bundle_dir="${GITHUB_WORKSPACE}/c6-prebuild"
+          mkdir -p "$bundle_dir"
+          install -m 0755 "$test_binary" \
+            "$bundle_dir/vault-c6-risc0-succinct-test"
+          install -m 0755 \
+            /workspace/vault/scripts/run-zk-risc0-succinct-prebuilt-cuda.sh \
+            "$bundle_dir/run-zk-risc0-succinct-prebuilt-cuda.sh"
+          ldd "$bundle_dir/vault-c6-risc0-succinct-test" \
+            > "$bundle_dir/ldd.txt"
+
+          source_commit="$(git -C /workspace/vault rev-parse HEAD)"
+          binary_sha256="$(sha256sum "$bundle_dir/vault-c6-risc0-succinct-test" | awk '{ print $1 }')"
+          binary_bytes="$(wc -c < "$bundle_dir/vault-c6-risc0-succinct-test" | tr -d '[:space:]')"
+          {
+            echo 'schema=vault-c6-risc0-cuda-prebuild-v1'
+            echo "source_commit=$source_commit"
+            echo 'host_rust=1.90.0'
+            echo 'guest_rust=1.97.0'
+            echo 'rzup=0.5.2'
+            echo 'cuda_image=nvidia/cuda:12.8.1-devel-ubuntu24.04'
+            echo 'risc0_zkvm=3.0.6'
+            echo 'reviewed_guest_id=85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128'
+            echo "binary_bytes=$binary_bytes"
+            echo "binary_sha256=$binary_sha256"
+          } > "$bundle_dir/build.manifest.txt"
+
+          cd "$GITHUB_WORKSPACE"
+          tar -czf vault-c6-risc0-cuda-prebuild.tar.gz c6-prebuild
+          sha256sum vault-c6-risc0-cuda-prebuild.tar.gz \
+            > vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+      - name: Upload prebuilt bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vault-c6-risc0-cuda-prebuild-${{ github.sha }}
+          path: |
+            vault-c6-risc0-cuda-prebuild.tar.gz
+            vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30

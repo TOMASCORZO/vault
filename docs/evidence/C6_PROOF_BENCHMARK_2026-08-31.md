@@ -1,7 +1,7 @@
 # C6 proof-system benchmark — 2026-08-31
 
-**Status:** in progress; Halo2 local measurements complete, comparative C6
-closure incomplete.
+**Status:** in progress; Halo2 selection measurements complete, one RISC Zero
+Succinct classification run remains.
 
 ## Decision
 
@@ -11,10 +11,13 @@ rejected for direct base-layer activation in its measured Composite form: its
 311,977,650-byte receipt exceeds the 2,097,152-byte protocol limit, regardless
 of proving speed.
 
-This is not C6 closure. Repeated RISC Zero proving, peak memory, concurrency,
-and 4/8/16-action measurements were not purchased. Persistent Halo2 key loading
-also remains an A4 implementation and benchmark task. Missing measurements are
-reported as missing, not inferred from the successful two-action receipt.
+This is not C6 closure until the prepared Succinct classification run and the
+selection record are complete. Repeated RISC Zero proving, concurrency, and
+4/8/16-action measurements will not be purchased for a candidate already
+rejected by hard protocol and activation blockers. Stable Halo2 parameter/key
+serialization and cold loading remain A4 release engineering, not missing C6
+selection measurements. Missing RISC Zero measurements are reported as not
+purchased, not inferred from the successful two-action receipt.
 
 ## Halo2 methodology
 
@@ -110,14 +113,16 @@ in [`../runbooks/C6_RISC0_SUCCINCT_CUDA.md`](../runbooks/C6_RISC0_SUCCINCT_CUDA.
 It reuses the published Composite receipt rather than repeating base proving.
 No Succinct measurement exists until that procedure actually completes.
 
-1. Implement reviewed persistent Halo2 parameter/VK/PK artifacts and measure
-   cold load separately from transparent derivation.
-2. Run the single Composite-to-Succinct decision gate on declared CUDA
-   hardware. If it does not fit the protocol bound, reject the pinned backend
-   without purchasing larger-bucket runs.
-3. Only if Succinct fits, prepare and repeat key/load, prove, verify, memory,
-   size, concurrency, and all-bucket RISC Zero measurements on declared
-   hardware.
-4. Re-run the dependency/advisory review at the selection commit.
+1. Run the single prebuilt Composite-to-Succinct classification gate on
+   declared CUDA hardware and preserve its receipt, log, manifest, environment,
+   and resource samples.
+2. Re-run the dependency/advisory review at the selection commit and record the
+   final selection of Halo2 and rejection of RISC Zero 3.0.6 for direct
+   base-layer use.
+
+Persistent Halo2 parameter/VK/PK artifacts and cold-load measurement remain
+A4. No repeated RISC Zero all-bucket run is required unless a future maintained
+version clears the present protocol and activation blockers and is nominated as
+a selection candidate.
 
 No verifier is activated by this report.

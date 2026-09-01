@@ -10,125 +10,138 @@ receipt to a Succinct receipt
 `85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128`
 
 This run does not repeat guest execution or the 1.16-billion-cycle base proof.
-It cryptographically compresses the already published 311,977,650-byte
-Composite receipt through RISC Zero recursion, verifies the resulting Succinct
-receipt against the same guest and transfer-v2 journal, rejects public-input,
-proof-byte, and truncation mutations, and compares its exact encoded size with
+It compresses the published 311,977,650-byte Composite receipt, verifies the
+Succinct result and negative mutations, and compares its encoded size with
 Vault's 2,097,152-byte protocol bound.
 
-## Decision boundary
+## Exact remaining C6 boundary
 
-- If the Succinct receipt exceeds 2,097,152 bytes or compression fails under
-  the pinned backend, reject RISC Zero 3.0.6 for direct base-layer transfers and
-  do not purchase all-bucket runs.
-- If it fits, retain RISC Zero as a benchmark candidate. Before C6 can close,
-  prepare 4/8/16-action fixtures locally and plan repeated all-bucket proving,
-  memory, and concurrency measurements.
+Halo2's C6 selection measurements are complete: three repetitions for every
+2/4/8/16-action bucket, verification, proof size, process peak RSS, transparent
+key preparation, and a two-worker concurrency run. Stable parameter/VK/PK
+serialization and cold loading are release engineering under A4, not another
+C6 proof-system selection experiment.
 
-Either outcome is evidence. A successful small receipt does not activate the
-backend or resolve its dependency advisories.
+The only external-compute task remaining for C6 is this one Succinct run. RISC
+Zero 3.0.6 is already rejected for direct base-layer selection because its
+measured Composite proof violates the protocol limit, its measured base proof
+took 1,329.338 seconds, and its resolved host lock has activation-blocking
+advisories. The Succinct run determines whether its wrapping path also violates
+the size bound. It does not justify purchasing repeated 4/8/16-action or
+concurrency runs for a rejected candidate.
 
-## Rent only after the branch is published
+## Free preparation — finish before renting
+
+Never compile or install Rust on a billed GPU host.
+
+1. Push the exact source commit.
+2. Manually run `.github/workflows/c6-risc0-cuda-prebuild.yml`. It builds at the
+   canonical `/workspace/vault` path inside
+   `nvidia/cuda:12.8.1-devel-ubuntu24.04`, reproduces the reviewed guest ID, and
+   uploads a standalone test bundle plus hashes.
+3. Download and verify that CI artifact on the development machine.
+4. Publish the verified archive as prerelease
+   `c6-risc0-cuda-prebuild-v1` before starting a rental.
+5. Confirm that both release URLs below return successfully and retain their
+   expected SHA-256 values.
+
+The paid host downloads only:
+
+- the prebuilt test archive, expected to be tens of megabytes; and
+- the already published 311,977,650-byte Composite receipt.
+
+The prebuilt runner requires no repository clone, `apt`, Rust, `rzup`, Cargo,
+`nvcc`, or compilation.
+
+## Rental profile
 
 Use one non-preemptible Linux x86_64 host with:
 
 - one NVIDIA GPU with at least 32 GiB VRAM;
 - at least 64 GiB system RAM and 16 vCPUs;
-- at least 100 GiB free SSD;
-- Ubuntu 24.04 and the CUDA 12.8 development toolkit, including `nvcc`;
-- SSH access and enough uninterrupted time for an unmeasured recursion run.
+- 30 GiB disk (the prebuilt path uses well below this; the margin covers the
+  CUDA image and output);
+- the exact `nvidia/cuda:12.8.1-devel-ubuntu24.04` image or a compatible CUDA
+  12.8 image confirmed by the bundle's `ldd.txt`;
+- SSH access.
 
-The prior H100 evidence did not record peak VRAM for this different workload,
-so 32 GiB is a measured hypothesis, not a guarantee. Do not choose a spot or
-preemptible host for the first run.
+The first recursion run has no measured peak VRAM, so 32 GiB is a hypothesis,
+not a guarantee. Do not use a spot/preemptible host.
 
-## Prepare the canonical host
+## Paid phase — no setup or compilation
 
-The checkout path remains part of the reviewed guest build identity:
-
-```bash
-sudo mkdir -p /workspace
-sudo chown "$(id -u):$(id -g)" /workspace
-cd /workspace
-git clone --branch codex/c1-transfer-v2 --single-branch \
-  https://github.com/TOMASCORZO/vault.git
-cd vault
-./scripts/setup-zk-risc0-cuda-host.sh
-export PATH="${HOME}/.cargo/bin:${PATH}"
-```
-
-Confirm a clean, exact checkout:
+Start billing only after the prerelease and receipt URLs are ready. On the
+rented host:
 
 ```bash
-git status --short --branch
-git rev-parse HEAD
-```
+mkdir -p /workspace/c6 /workspace/evidence
+cd /workspace/c6
 
-## Obtain the already published Composite receipt
-
-Do not generate it again:
-
-```bash
-sudo mkdir -p /mnt/vault-evidence
-sudo chown "$(id -u):$(id -g)" /mnt/vault-evidence
+curl --fail --location \
+  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild.tar.gz \
+  --output vault-c6-risc0-cuda-prebuild.tar.gz &
+bundle_download_pid=$!
 curl --fail --location \
   https://github.com/TOMASCORZO/vault/releases/download/c4-risc0-transfer-v2-v1/vault-c1-transfer-v2.receipt.bin \
-  --output /mnt/vault-evidence/vault-c1-transfer-v2.receipt.bin
-sha256sum /mnt/vault-evidence/vault-c1-transfer-v2.receipt.bin
+  --output /workspace/evidence/vault-c1-transfer-v2.receipt.bin &
+receipt_download_pid=$!
+wait "$bundle_download_pid" "$receipt_download_pid"
+
+curl --fail --location \
+  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild.tar.gz.sha256 \
+  --output vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+sha256sum --check vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+echo '12c952e2da0466d7047586404b15c7ad6fa59675bb8c975019b4645dca7e6e96  /workspace/evidence/vault-c1-transfer-v2.receipt.bin' |
+  sha256sum --check
+tar -xzf vault-c6-risc0-cuda-prebuild.tar.gz
+nvidia-smi
 ```
 
-The required SHA-256 is:
-
-```text
-12c952e2da0466d7047586404b15c7ad6fa59675bb8c975019b4645dca7e6e96
-```
-
-The compression script independently checks both this hash and the exact
-311,977,650-byte length before starting CUDA work.
-
-## Run compression
+Run the prebuilt test directly:
 
 ```bash
-export VAULT_C6_COMPOSITE_RECEIPT_PATH=/mnt/vault-evidence/vault-c1-transfer-v2.receipt.bin
-export VAULT_C6_SUCCINCT_RECEIPT_PATH=/mnt/vault-evidence/vault-c6-transfer-v2.succinct.receipt.bin
+export VAULT_C6_TEST_BINARY_PATH=/workspace/c6/c6-prebuild/vault-c6-risc0-succinct-test
+export VAULT_C6_BUNDLE_MANIFEST_PATH=/workspace/c6/c6-prebuild/build.manifest.txt
+export VAULT_C6_COMPOSITE_RECEIPT_PATH=/workspace/evidence/vault-c1-transfer-v2.receipt.bin
+export VAULT_C6_SUCCINCT_RECEIPT_PATH=/workspace/evidence/vault-c6-transfer-v2.succinct.receipt.bin
 
-tmux new-session -d -s vault-c6 './scripts/compress-zk-risc0-succinct-cuda.sh'
-tmux attach-session -t vault-c6
+/workspace/c6/c6-prebuild/run-zk-risc0-succinct-prebuilt-cuda.sh
 ```
 
-Detach with `Ctrl-b d`. The script samples utilization and VRAM every
-two seconds and records GNU `time -v` host-resource metrics. It refuses to
-overwrite any evidence file and forces the local cryptographic prover with
-development mode unset.
+The runner refuses an incorrect binary, input receipt, architecture, memory
+profile, development mode, or existing output. It forces the local
+cryptographic prover and samples host RSS and GPU utilization/VRAM every two
+seconds.
 
-## Files that must leave the rented host
+## Time and cost control
 
-Copy these six new files before destroying the instance:
+Expected billed setup is only boot/SSH plus roughly 400 MB of parallel
+downloads and a sub-minute preflight. Compression time is deliberately not
+estimated until measured; it should dominate the rental. Do not rebuild the
+base receipt, clone the repository, update packages, or troubleshoot a build on
+the GPU. If the preflight fails, stop and destroy the host rather than repairing
+it under billing.
+
+After the runner exits, immediately copy these five files off the host:
 
 ```text
 vault-c6-transfer-v2.succinct.receipt.bin
 vault-c6-transfer-v2.succinct.receipt.bin.log
 vault-c6-transfer-v2.succinct.receipt.bin.environment.txt
 vault-c6-transfer-v2.succinct.receipt.bin.manifest.txt
-vault-c6-transfer-v2.succinct.receipt.bin.gpu.csv
-vault-c6-transfer-v2.succinct.receipt.bin.resources.txt
+vault-c6-transfer-v2.succinct.receipt.bin.resources.csv
 ```
 
-The original Composite receipt is already published and need not be downloaded
-again. Verify the copied output hash against the generated manifest, then
-destroy the rented instance and its storage.
+Verify the copied output hash against the generated manifest, then destroy the
+instance and its attached storage. The original Composite receipt does not need
+to be copied back.
 
-## What counts as a pass
+## What counts as valid evidence
 
-The log must show:
+The log must show the reviewed guest ID and public-input digest, a verified
+Succinct receipt after reopening, rejection of a wrong public digest, a changed
+proof byte and truncation, and `test result: ok`. The manifest records exact
+input/output hashes and bytes, compression time, peak GPU memory, peak host RSS,
+and whether the result fits the protocol bound.
 
-- `input_receipt_kind=composite` and `output_receipt_kind=succinct`;
-- the reviewed guest ID and canonical public-input digest;
-- successful verification after reopening the saved output;
-- rejection of the wrong public digest, a changed proof byte, and truncation;
-- `test result: ok`;
-- exact output bytes and compression elapsed milliseconds.
-
-The manifest separately records whether the Succinct receipt fits the protocol
-size bound. That boolean is a selection result, not a substitute for the
-cryptographic checks above.
+Either size result is useful evidence; neither activates a verifier.
