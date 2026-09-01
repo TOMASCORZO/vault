@@ -121,12 +121,12 @@ later milestones do not expand H1 cryptographic implementation.
 - [x] Separate explicit initialization from normal opening for both signer
   stores; reject duplicate initialization and fail closed on missing lifecycle
   or anti-replay state instead of silently resetting it.
-- [ ] Independently review pairing and both Unix stores; implement keychain and
+- [ ] Adversarially review and test pairing and both Unix stores; implement keychain and
   trusted confirmation/revocation UX adapters, active-session shutdown,
   secure-element rollback counters, other platform stores, hardware adapters,
   multisignature, and delegated-proving profiles.
 - [ ] Activate a verifier only after all proof, wallet, vector, benchmark, and
-  independent-review gates pass.
+  internal security gates pass.
 - [ ] Benchmark at least two maintained proof-system implementations.
 - [x] Define proof parameter and trusted-setup assumptions for both backends;
   both use transparent parameter generation, while reproducible artifact and
@@ -134,7 +134,6 @@ later milestones do not expand H1 cryptographic implementation.
 - [x] Publish the first deterministic envelope transcript vector.
 - [ ] Publish real-proof positive and negative test vectors for both backends.
 - Design epoch burn aggregation and low-volume privacy handling.
-- Commission an external cryptography design review.
 
 **Exit criterion:** reproducible proofs verify all invariants; no production or
 security claim is made.
@@ -185,7 +184,8 @@ Contracts must not bypass or weaken the base privacy model.
 
 - Multiple independent implementations or client diversity plan.
 - Incentivized adversarial testnet.
-- Independent audits of cryptography, consensus, wallet, and cross-chain code.
+- Publish reproducible adversarial suites and security reports for cryptography,
+  consensus, wallet, and cross-chain code.
 - Reproducible builds, hardware-wallet support, incident response, and bug bounty.
 - Final genesis allocation, emission, legal analysis, and public risk disclosures.
 

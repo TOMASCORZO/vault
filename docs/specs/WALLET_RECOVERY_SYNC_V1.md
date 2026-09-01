@@ -2,7 +2,7 @@
 
 **Status:** production-intent bounded coordinator and source boundary
 implemented; consensus/light-client adapters, private transport, benchmarks,
-fault injection, and independent review remain activation gates  
+fault injection, and internal security review remain activation gates
 **Last updated:** 2026-08-23
 
 ## 1. Purpose

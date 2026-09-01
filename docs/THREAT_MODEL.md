@@ -15,12 +15,12 @@ every Ironwood output and pins the complete transfer policy before signing, but
 hardware, multiparty, and delegated-prover transports are not yet implemented
 or reviewed. Pinned Noise XX first contact, explicit fingerprint confirmation,
 the paired Noise KK channel, a channel-bound one-shot request flow, and a
-crash-consistent Unix replay store are now implemented. Independent review,
-host-rollback-resistant state, non-Unix/hardware adapters, and confirmation and
-revocation UX remain open. The finalized compact-block scanner authenticates
+crash-consistent Unix replay store are now implemented. Internal adversarial
+review, host-rollback-resistant state, non-Unix/hardware adapters, and
+confirmation and revocation UX remain open. The finalized compact-block scanner authenticates
 header-bound block/tree metadata, replays every commitment, and trial-decrypts
 all outputs locally; its durable encrypted witness database and private network
-retrieval remain open. The repository remains unaudited.
+retrieval remain open.
 
 ## Assets to protect
 
@@ -77,8 +77,8 @@ be stated against concrete adversaries and measured anonymity sets.
 6. Supply/burn aggregation.
 7. Durable-storage incentives.
 
-Each requires independent review, adversarial tests, and an audit before
-mainnet. Cross-chain adapters also require per-chain caps, pause-only circuit
+Each requires documented adversarial tests and reproducible internal security
+review before mainnet. Cross-chain adapters also require per-chain caps, pause-only circuit
 breakers, monitoring, and delayed limit increases.
 
 ## H1 implementation defenses already present
@@ -192,11 +192,11 @@ breakers, monitoring, and delayed limit increases.
   IP, height interval, timing, retries, and bandwidth.
 
 These implemented proof components remain deliberately disconnected from an
-activatable verifier. Independent pairing/store review, host-rollback-resistant
+activatable verifier. Adversarial pairing/store review, host-rollback-resistant
 hardware state, keychain and active-session lifecycle adapters, non-Unix stores,
 hardware/multiparty adapters and trusted-intent UX, corpus vectors and
-benchmarks, DKG lifecycle, wallet security, and
-external review remain mandatory before activation. A spending owner can always
+benchmarks, DKG lifecycle, wallet security, and internal security review remain
+mandatory before activation. A spending owner can always
 authorize an unavailable output or disclose its own information; Vault therefore
 treats successful recipient decryption as a precondition for payment acceptance
 and signer verification as a critical security boundary. See

@@ -164,7 +164,7 @@ distribution, backup operations/drills, migrations,
 hardware/keychain root-key and rollback state, exhaustive crash/power-loss
 injection, long-history pruning and growth measurements,
 file-size/access-pattern mitigation, private block retrieval, side-channel
-benchmarks, and independent review remain activation gates.
+benchmarks and internal security review remain activation gates.
 
 ## 6. Implemented evidence
 

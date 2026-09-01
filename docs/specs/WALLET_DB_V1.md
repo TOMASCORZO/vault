@@ -2,7 +2,7 @@
 
 **Status:** production-intent Unix database, authenticated backup/restore,
 finalized birthday frontier, and durable seed-recovery state; seed custody, migration,
-platform-keystore, fault-injection, side-channel, and independent-review gates
+platform-keystore, fault-injection, side-channel, and internal-review gates
 remain open  
 **Last updated:** 2026-08-23
 

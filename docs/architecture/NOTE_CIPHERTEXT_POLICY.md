@@ -56,7 +56,7 @@ An invalid note ciphertext cannot create VLT, evade gas or burn, change the
 proven recipient, or make a note spendable by a different key. It can deny
 delivery of a value that the spending owners authorized. Wallet and hardware
 signer correctness therefore remain part of the security boundary and require
-their own audit.
+their own adversarial test suite.
 
 The burn ciphertext has a different policy. Its plaintext changes the global
 monetary accounting, so Halo2 proves both threshold-ElGamal equations from the
@@ -123,7 +123,7 @@ Before this policy can be frozen, Vault must:
   component and every 2/4/8/16 Action bucket;
 - fuzz parsing and mutation boundaries and benchmark signer, prover, and
   validator paths;
-- pass independent review of the Ironwood integration, multi-party signing
+- pass the project security review of the Ironwood integration, multi-party signing
   threat model, hardware-wallet interface, and recipient acceptance rules.
 
 Until those gates close, a generated proof is engineering evidence only and

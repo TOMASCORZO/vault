@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-31
 **Current milestone:** H1 — private-transfer production foundation  
-**Maturity:** production-intent, unaudited, not activated, not safe for real funds
+**Maturity:** production-intent, not activated, not safe for real funds
 
 ## Start here
 
@@ -47,7 +47,7 @@ private programmable contracts, permissionless exchange and BTC routes, and
 durable application storage. These are roadmap objectives, not current claims.
 Absolute anonymity, permanence, low fees, throughput, decentralization, or safety
 must not be claimed until the corresponding model, implementation, measurements,
-operational evidence, and independent reviews exist.
+operational evidence, and reproducible project security gates exist.
 
 The user explicitly rejected disposable MVPs and demo-only security. All work must
 target the deployable architecture while remaining honest about incomplete gates.
@@ -102,8 +102,8 @@ and suite ID
 `991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a`.
 Real release proofs for every bucket passed on the Ryzen host, as did mutation
 of every two-action public-instance cell and the private classification/value
-negative matrix. This does not close C4 vectors, C6 comparative benchmarks, C7
-review, or verifier activation.
+negative matrix. This does not close C4 vectors, C6 comparative benchmarks, or
+verifier activation.
 
 The Halo2 half of C4 is committed under
 `zk/halo2/core/tests/vectors`: four 9,664-byte real proofs, canonical public
@@ -155,8 +155,9 @@ silently replaced or repeatedly started during normal M1 development:
    The existing Ryzen measurements are engineering evidence, not that final
    benchmark. It can be scheduled later on declared comparable hardware.
 
-C7 remains external independent review. Do not mark C4, C6, C7, or A5
-complete merely because implementation continues successfully on the M1.
+Do not mark C4, C6, or A5 complete merely because implementation continues
+successfully on the M1. External audit is optional and is not a closure gate;
+the project-controlled reproducible suites are the acceptance authority.
 
 The branch now includes a host-only, opt-in `cuda-prover` feature and the
 fail-closed external-GPU procedure in
@@ -220,7 +221,7 @@ cryptographic scope.
 > implementation-evidence boundaries and C4 as in progress. The real RISC Zero
 > receipt already exists locally with its hash and provenance recorded; do not
 > restart proving. Complete C4 publication/negative-vector packaging or continue
-> the next locally actionable bounded item, normally C5, while keeping C1-C7
+> the next locally actionable bounded item, normally C5, while keeping C1-C6
 > separate from A1-A5 and H2. Do not create prototypes, expand H1 with
 > H2/mainnet work, start contracts, use real funds, or claim production
 > readiness.

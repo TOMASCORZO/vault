@@ -106,7 +106,7 @@ The codec and paired Noise request/session path are implemented, but they do
 not yet complete a hardware-wallet or multiparty product. Activation still
 requires:
 
-- independent review of the implemented first-contact pairing, encrypted peer
+- adversarial review and tests of the implemented first-contact pairing, encrypted peer
   registry, and Unix crash-consistent replay store, plus keychain integration,
   active-session shutdown, and rollback-resistant state for each hardware and
   additional software platform;

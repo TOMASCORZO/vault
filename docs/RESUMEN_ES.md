@@ -2,15 +2,14 @@
 
 Vault se está construyendo como infraestructura financiera crítica. El proyecto
 no usa “privacidad” como una etiqueta comercial: cada propiedad deberá estar
-definida contra adversarios concretos, cubierta por pruebas y revisada por
-especialistas externos.
+definida contra adversarios concretos y cubierta por pruebas reproducibles.
 
 Desde el 21 de agosto de 2026, todo trabajo nuevo debe apuntar a la arquitectura
 desplegable: no se aceptan MVP desechables, rutas de demostración ni garantías
 de seguridad simplificadas como entregables. La intención de producción no
 significa que el estado actual sea seguro; cada componente debe superar las
-especificaciones, pruebas adversariales, benchmarks, builds reproducibles,
-revisión independiente y auditorías establecidas en el
+especificaciones, pruebas adversariales, benchmarks, builds reproducibles e
+informes de seguridad establecidos en el
 [`estándar de producción`](PRODUCTION_STANDARD.md).
 
 ## Implementado

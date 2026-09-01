@@ -68,7 +68,7 @@ Primary specifications and implementation:
 
 Vault does not claim that dependency reuse transfers Zcash's audit status to
 Vault. Integration, Vault-specific key derivation, transaction statements, and
-release builds require independent review.
+release builds require Vault-specific adversarial and conformance suites.
 
 ## 3. Vault domain separation
 
@@ -240,6 +240,6 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   network relays, and complete wallet recovery/durability operations are not
   implemented.
 
-Private smart contracts remain blocked behind completion and independent review
-of the private-transfer path. Contract state will extend this note model only
+Private smart contracts remain blocked behind completion of the project security
+gates for the private-transfer path. Contract state will extend this note model only
 after its base invariants and metadata behavior are demonstrated.

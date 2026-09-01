@@ -1,6 +1,6 @@
 # Vault transfer-v2 consensus envelope
 
-**Maturity:** production-intent, unaudited, not activated  
+**Maturity:** production-intent, not activated
 **Codec version:** 2  
 **Normative implementation:** `crates/vault-protocol/src/transfer_v2.rs`  
 **State transition:** `crates/vault-protocol/src/state_v2.rs`
@@ -8,7 +8,7 @@
 This document specifies the unique byte encoding and host-side state transition
 for native-VLT shielded transfers. It does not claim that the transfer is safe:
 the specialized circuit, burn-encryption construction, persistence layer,
-benchmarks, and independent review remain release blockers.
+benchmarks and internal security review remain release blockers.
 
 The keywords MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT, and
 MAY are consensus requirements.
@@ -154,7 +154,7 @@ proof-equivalent policy therefore requires the proof to bind the complete
 canonical effects digest and requires every signer to reconstruct and validate
 the full output before authorizing that digest. The normative signer packet and
 verification implementation are present with production intent, but durable
-wallet, UX, vector, hardware, and independent-review gates remain open, so
+wallet, UX, vector, hardware, and internal-review gates remain open, so
 transfer-v2 MUST NOT be activated. See
 [`../architecture/NOTE_CIPHERTEXT_POLICY.md`](../architecture/NOTE_CIPHERTEXT_POLICY.md).
 

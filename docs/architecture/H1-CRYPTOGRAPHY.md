@@ -3,7 +3,7 @@
 **Decision status:** Ironwood V3 note/key/encryption suite and hardened Halo2
 Action circuit selected; transfer-v2 codec implemented; Vault accounting and
 burn-encryption circuit not frozen.  
-**Security status:** production-intent foundation, unaudited and not activated.
+**Security status:** production-intent foundation, not activated.
 
 ## 1. State model
 

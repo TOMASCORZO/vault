@@ -2,7 +2,7 @@
 
 ## Project directive
 
-Vault is intended to become an audited, permissionless public network that can
+Vault is intended to become a permissionless public network that can
 compete technically with leading cryptocurrency systems. Starting on
 2026-08-21, new deliverables must be designed and implemented for the deployable
 architecture. A disposable MVP, demo-only implementation, or simplified
@@ -40,10 +40,11 @@ component and by the integrated network.
 7. **Plan operations and evolution.** Release work includes key management,
    observability without privacy leakage, backups, disaster recovery, incident
    response, compatible upgrades, rollback boundaries, and data migrations.
-8. **Require independent evidence.** Mainnet eligibility requires independent
-   review and audits of cryptography, consensus, networking, wallet, VM,
-   cross-chain, economics, and operational security, plus resolution of all
-   critical and high-severity findings.
+8. **Require reproducible project evidence.** Mainnet eligibility is decided
+   from Vault's specifications, deterministic vectors, adversarial and fuzz
+   tests, realistic benchmarks, reproducible builds, public security reports,
+   and resolution of every known critical and high-severity finding. External
+   audits may supplement this evidence but are not a mandatory release gate.
 
 ## Delivery classification
 
@@ -55,9 +56,9 @@ Every component must have one explicit maturity label:
   has not passed every release gate.
 - **Release candidate:** scope is frozen and all internal gates, test vectors,
   benchmarks, and dependency checks pass.
-- **Mainnet-eligible:** independent review and audit gates pass, critical and
-  high findings are resolved, reproducible artifacts exist, and governance has
-  approved activation.
+- **Mainnet-eligible:** all project-controlled security and operational gates
+  pass, known critical and high findings are resolved, reproducible artifacts
+  exist, residual risks are public, and governance has approved activation.
 
 The word "implemented" must always be accompanied by the relevant maturity
 label when a reader could otherwise infer production safety.
@@ -91,7 +92,7 @@ Vault cannot be described as production-ready until, at minimum:
 - the VM is deterministic, metered, sandboxed, versioned, and supported by
   contract audit and fuzzing tools;
 - wallet recovery, viewing permissions, hardware signing, and safe transaction
-  construction have been independently reviewed;
+  construction pass their documented adversarial and fault-injection suites;
 - DEX and cross-chain routes have explicit trust models and cannot create
   unbacked VLT or silently place custody in one operator;
 - durable storage has measured replication, repair, funding, retrieval, and

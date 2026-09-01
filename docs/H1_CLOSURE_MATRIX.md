@@ -23,14 +23,13 @@ listed evidence. Passing these gates does not activate a verifier.
 | C4 | Publish real-proof positive and negative vectors for both backends. | Versioned manifest with hashes, exact toolchains, public inputs, expected acceptance/rejection, proof-size bounds, and an offline verifier. Large proof artifacts may be release artifacts when repository size policy forbids committing them. | In progress: the Halo2 half is published in `zk/halo2/core/tests/vectors`. A real RISC Zero positive receipt was generated, verified twice, copied locally, and hash-checked, but its 298 MiB artifact, canonical public inputs, negative cases, and portable offline-verifier package still require publication. See `evidence/C1_RISC0_CUDA_2026-08-31.md`. |
 | C5 | Decide epoch burn aggregation and low-volume privacy behavior without weakening conservation. | Normative design covering DKG trust, threshold shares, malicious/missing shares, validator rotation, minimum aggregate policy, low-volume carry/merge behavior, bounded recovery, supply-statistic update, and fail-closed activation. | Open |
 | C6 | Benchmark at least two maintained proof implementations on declared hardware. | Repeated measurements of key preparation/load, proving, verification, peak memory, proof size, concurrency, and all action buckets; dependency and maintenance review; documented selection or rejection. | Open |
-| C7 | Obtain independent cryptographic design review of the frozen statement, burn aggregation, setup assumptions, and vectors. | Versioned review report and disposition of every critical/high finding. This is externally blocked until C1-C6 are reviewable. | Blocked on C1-C6 |
 
 The Halo2 C2 closure freezes implementation shape and deterministic key
 identity; it does not publish C4 release vectors, satisfy C6 comparative
-benchmarking, provide C7 independent review, or activate a verifier. The RISC
+benchmarking, or activate a verifier. The RISC
 Zero transfer-v2 statement and real-receipt evidence complete C1. That result
 does not publish the remaining C4 vector package, satisfy C6 comparative
-benchmarking, provide C7 independent review, or activate a verifier.
+benchmarking, or activate a verifier.
 
 ## H1 activation hardening
 
@@ -42,7 +41,7 @@ These items can block activation without reopening cryptographic scope:
 | A2 | Wallet privacy and platform storage | Private and padded retrieval, keychain/secure-element keys and rollback state, multi-platform stores, private retrieval and side-channel benchmarks. |
 | A3 | Signer lifecycle and hardware profiles | Independent pairing/store review, trusted confirmation/revocation UX, active-session shutdown, secure rollback counters, platform stores, hardware, multisignature, and delegated-proving profiles. |
 | A4 | Release engineering | Reproducible builds and artifacts, dependency/advisory gates, persistent parameter/key loading, operational limits, activation/deactivation and migration procedures. |
-| A5 | Verifier activation decision | All C1-C7 and applicable A1-A4 evidence passes; an explicit suite and circuit ID are approved. No verifier is activatable before this decision. |
+| A5 | Verifier activation decision | All C1-C6 and applicable A1-A4 reproducible project evidence passes; an explicit suite and circuit ID are approved. No verifier is activatable before this decision. |
 
 ## H2 consensus and network integration
 
@@ -69,5 +68,11 @@ future feature needs private transfers.
 For each completed item, record the exact specification, code, vector or report,
 commands run, declared hardware, and remaining activation blockers. An unchecked
 roadmap umbrella may link here instead of being expanded indefinitely. External
-review, hardware availability, or H2 consensus dependencies must be reported as
-such and never replaced with a mock, trusted, or fail-open path.
+review is optional supplementary evidence. Hardware availability or H2 consensus
+dependencies must be reported as such and never replaced with a mock, trusted,
+or fail-open path.
+
+On 2026-08-31 the project owner removed external cryptographic review as a
+mandatory closure item. The former C7 gate was deleted; Vault's reproducible
+internal tests and documented security evidence are the acceptance authority.
+This policy does not turn passing tests into a claim of absolute security.

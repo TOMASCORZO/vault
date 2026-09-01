@@ -8,13 +8,12 @@ disposable MVPs or simplified security paths are accepted as deliverables.
 
 > **Current status: pre-mainnet H1 foundation with legacy research
 > components.** This repository is not a live blockchain, does not yet provide
-> end-to-end transaction privacy, has not been independently audited, and must
-> not be used with real funds.
+> end-to-end transaction privacy and must not be used with real funds.
 
 Production intent describes the engineering target, not the current maturity.
 Every component must earn release-candidate and mainnet-eligible status through
 specification, adversarial testing, realistic benchmarks, reproducible builds,
-independent review, and audits.
+public security reports, and resolution of known critical findings.
 
 ## What exists today
 
@@ -148,7 +147,7 @@ independent review, and audits.
     constructed with the private note;
   - generated and verified a real 9,600-byte proof of the resulting shape;
   - remains fail-closed and non-activatable until signer transport/UX profiles,
-    all-bucket vectors, benchmarks, and independent reviews are complete.
+    all-bucket vectors, benchmarks, and internal security gates are complete.
 
 The transparent reference model validates accounting rules before those rules
 are moved into zero-knowledge circuits. Its numeric note identifiers and clear
@@ -223,12 +222,12 @@ blocked on the unfinished consensus layer; RPC agreement is explicitly not
 treated as finality. The next wallet blocks are approved seed custody, private
 and padded retrieval, migration, pruning/compaction, secure key and rollback-counter integration,
 crash/power-loss fault injection, restore drills, and
-access-pattern/timing measurements. Independent signer review,
+access-pattern/timing measurements. Adversarial signer testing,
 keychain-backed trusted pairing/payment/revocation UX, active-session shutdown,
 secure-element rollback protection, hardware/multisignature/delegated-prover
 adapters, and fixed vectors plus performance coverage remain mandatory.
 No suite ID or consensus verifier is issued until those gates, benchmarks, and
-independent reviews are complete. Threshold DKG lifecycle, bounded aggregate
+internal security reviews are complete. Threshold DKG lifecycle, bounded aggregate
 recovery, network privacy, complete wallet recovery, and durable-state operations
 also remain required. See [`OUTPUT_AUTHORIZATION_V1.md`](docs/specs/OUTPUT_AUTHORIZATION_V1.md).
 Signer transport details: [`SIGNER_TRANSPORT_V1.md`](docs/specs/SIGNER_TRANSPORT_V1.md).

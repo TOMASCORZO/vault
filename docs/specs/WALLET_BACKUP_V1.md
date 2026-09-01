@@ -178,5 +178,5 @@ This format does not yet provide seed/key recovery, backup rotation policy,
 multi-copy inventory, cloud-provider privacy, deletion verification, damaged
 backup repair, cross-version migration, key rotation, secure rollback-floor
 updates, user confirmation UX, crash injection at every publication boundary,
-or scheduled restore drills. Those controls and independent review remain
+or scheduled restore drills. Those controls and internal security review remain
 mandatory before real funds.

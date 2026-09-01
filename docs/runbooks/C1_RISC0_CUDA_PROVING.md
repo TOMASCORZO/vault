@@ -2,7 +2,7 @@
 
 **Scope:** C1 real-receipt evidence and the RISC Zero half of C4
 
-**Maturity:** production-intent, unaudited, non-activatable
+**Maturity:** production-intent, non-activatable
 
 **Pinned backend:** RISC Zero 3.0.6, Composite receipt
 **Reviewed guest ID:**

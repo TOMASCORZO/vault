@@ -37,7 +37,7 @@ An asset is not “supported” until all are complete:
 - quote expiry, slippage, and complete fee disclosure;
 - chain-specific monitoring and incident playbook;
 - per-route value caps and delayed increases;
-- at least two independent audits;
+- reproducible adversarial suites for every route and failure transition;
 - wallet recovery tests for crashes at every protocol step.
 
 ## Censorship limits
@@ -46,4 +46,3 @@ Atomic swaps reduce custody and listing dependence, but cannot create liquidity,
 hide the public Bitcoin leg, guarantee network access, or prevent interface and
 app-store blocking. Solver discovery and the reference UI must therefore work
 over an open P2P protocol and from a locally served application.
-

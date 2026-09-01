@@ -2,7 +2,7 @@
 
 **Status:** production-intent deterministic account discovery, finalized target,
 durable progress, and birthday-frontier initialization implemented; custody,
-checkpoint distribution, operational UX, fault injection, and independent review
+checkpoint distribution, operational UX, fault injection, and internal security review
 remain activation gates  
 **Last updated:** 2026-08-23
 

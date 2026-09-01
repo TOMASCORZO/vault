@@ -19,7 +19,7 @@ an existing H1 deliverable incorrect; record the reason explicitly.
 
 ## Production intent is mandatory
 
-Vault is being engineered for an eventual audited public mainnet, not as a
+Vault is being engineered for an eventual public mainnet, not as a
 demo, tutorial, hackathon project, or disposable MVP. All new implementation
 work must follow [`docs/PRODUCTION_STANDARD.md`](docs/PRODUCTION_STANDARD.md).
 
@@ -39,8 +39,8 @@ work must follow [`docs/PRODUCTION_STANDARD.md`](docs/PRODUCTION_STANDARD.md).
   protocol requirements. Unnecessary complexity is a security liability; this
   rule forbids simplified guarantees, not clear implementations.
 - Never use real funds or make safety, privacy, decentralization, permanence,
-  throughput, or cost claims until the corresponding release gates and
-  independent reviews have passed.
+  throughput, or cost claims until the corresponding reproducible internal
+  release gates have passed and the residual risks are disclosed.
 
 Current research code remains non-production and must not be silently promoted.
 It may be retained as a test oracle or evaluation artifact only when its status

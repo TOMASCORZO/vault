@@ -349,7 +349,7 @@ and malformed lengths. All action buckets fit the fixed bound.
 
 This is not yet hardware-wallet-ready. Activation still requires:
 
-- independent cryptographic/security review of the implemented XX/KK profiles,
+- project cryptographic/security review of the implemented XX/KK profiles,
   pairing lifecycle, filesystem store, dependency surfaces, and test corpus;
 - production durable counter/replay stores for every additional software and
   hardware platform, including power-loss, backup, migration, and rollback tests;
@@ -357,7 +357,7 @@ This is not yet hardware-wallet-ready. Activation still requires:
   independent confirmation/revocation UX, multisignature participant rules,
   delegated-prover policy, rate limits, and privacy-safe diagnostics;
 - deterministic transport/request/response corpus files, parser fuzzing,
-  latency/memory benchmarks, dependency provenance, and external review.
+  latency/memory benchmarks, dependency provenance, and internal review.
 
 Until those gates close, the implementation must not protect real funds.
 

@@ -281,8 +281,8 @@ the private classification boundary: external recipients cannot be claimed as
 change, same-receiver change is accepted, taxable external payment is accepted,
 dummy markers are value-derived, and shifted private accounting values cannot
 reuse Action witnesses. These measurements freeze C2 evidence; they are not a
-capacity claim or a substitute for C4 vectors, C6 repeated comparative
-benchmarks, or C7 independent review.
+capacity claim or a substitute for C4 vectors or C6 repeated comparative
+benchmarks.
 
 The corresponding C4 Halo2 proof and public-instance artifacts, SHA-256
 manifest, reproduction procedure, and offline mutation verifier are published

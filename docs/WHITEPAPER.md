@@ -128,8 +128,8 @@ publishes only delayed, thresholded epoch aggregates with a supply-consistency
 proof. The selected production-intent construction is threshold exponential
 ElGamal over Pallas with a canonical epoch DKG descriptor; the per-transfer
 circuit equations and descriptor binding are implemented, while DKG consensus,
-bounded aggregate recovery, low-volume policy, and independent review remain
-H1 blockers.
+bounded aggregate recovery, low-volume policy, and their reproducible
+adversarial suites remain H1 blockers.
 
 The H0 implementation in `vault-core` is a transparent accounting oracle. It
 checks the formula, note conservation, gas distribution, and double-spend
