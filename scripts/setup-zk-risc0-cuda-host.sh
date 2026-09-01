@@ -33,6 +33,7 @@ fi
   ninja-build \
   pkg-config \
   protobuf-compiler \
+  time \
   tmux
 
 if ! command -v rustup >/dev/null 2>&1; then

@@ -105,11 +105,19 @@ and
 
 ## Exact remaining C6 work
 
+The isolated CUDA procedure for the first RISC Zero decision gate is prepared
+in [`../runbooks/C6_RISC0_SUCCINCT_CUDA.md`](../runbooks/C6_RISC0_SUCCINCT_CUDA.md).
+It reuses the published Composite receipt rather than repeating base proving.
+No Succinct measurement exists until that procedure actually completes.
+
 1. Implement reviewed persistent Halo2 parameter/VK/PK artifacts and measure
    cold load separately from transparent derivation.
-2. If a future RISC Zero proof format fits the protocol limit, repeat key/load,
-   prove, verify, memory, size, concurrency, and all-bucket measurements on
-   declared hardware. The current Composite backend stays rejected meanwhile.
-3. Re-run the dependency/advisory review at the selection commit.
+2. Run the single Composite-to-Succinct decision gate on declared CUDA
+   hardware. If it does not fit the protocol bound, reject the pinned backend
+   without purchasing larger-bucket runs.
+3. Only if Succinct fits, prepare and repeat key/load, prove, verify, memory,
+   size, concurrency, and all-bucket RISC Zero measurements on declared
+   hardware.
+4. Re-run the dependency/advisory review at the selection commit.
 
 No verifier is activated by this report.

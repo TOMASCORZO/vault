@@ -1,4 +1,6 @@
-//! Opt-in C1 proving and C4 offline-vector verification for transfer-v2.
+//! Opt-in C1 proving, C4 vector verification, and C6 receipt compression.
+
+use std::{fs::OpenOptions, io::Write, path::PathBuf, time::Instant};
 
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
@@ -10,6 +12,7 @@ use pasta_curves::{
     pallas,
 };
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+use risc0_zkvm::{InnerReceipt, ProverOpts, Receipt, default_prover};
 use vault_burn::{EpochBurnPublicKey, PreparedBurnCiphertext};
 use vault_privacy::{
     ActionNullifier, KeyScope, MEMO_BYTES, NOTE_TREE_DEPTH, NoteMembershipPath, NoteTreeRoot,
@@ -17,8 +20,8 @@ use vault_privacy::{
     PrivateNote, RandomizedSpendValidatingKey, VaultSpendingKey,
 };
 use vault_protocol::{
-    ChainId, CircuitId, EncryptedBurnV2, GasParameters, PublicInputDigest, TransferV2Action,
-    TransferV2Effects,
+    ChainId, CircuitId, EncryptedBurnV2, GasParameters, MAX_PROOF_BYTES, PublicInputDigest,
+    TransferV2Action, TransferV2Effects,
 };
 use vault_zk_accounting_core::transfer_v2::{
     MAXIMUM_VLT_ATOMIC, TransferV2ActionWitness, TransferV2BurnWitness, TransferV2ReferenceClaim,
@@ -262,6 +265,96 @@ fn published_risc0_vector_verifies_offline_and_rejects_mutations()
     println!("guest_id={}", encode_hex(&REVIEWED_REFERENCE_GUEST_ID));
     println!("public_inputs={}", effects.public_inputs_digest());
     println!("proof_bytes={}", proof.len());
+    Ok(())
+}
+
+#[test]
+#[ignore = "expensive C6 Composite-to-Succinct compression; run only on declared CUDA hardware"]
+fn compresses_published_composite_to_succinct_and_rejects_mutations()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert!(std::env::var_os("RISC0_DEV_MODE").is_none());
+    let input_path = PathBuf::from(
+        std::env::var_os("VAULT_C6_COMPOSITE_RECEIPT_PATH")
+            .ok_or("VAULT_C6_COMPOSITE_RECEIPT_PATH must name the published C4 receipt")?,
+    );
+    let output_path = PathBuf::from(
+        std::env::var_os("VAULT_C6_SUCCINCT_RECEIPT_PATH")
+            .ok_or("VAULT_C6_SUCCINCT_RECEIPT_PATH must name a new output file")?,
+    );
+    assert!(input_path.is_absolute());
+    assert!(output_path.is_absolute());
+    assert!(
+        !output_path.exists(),
+        "refusing to overwrite output receipt"
+    );
+
+    let composite_bytes = std::fs::read(&input_path)?;
+    assert_eq!(composite_bytes.len(), C4_RECEIPT_BYTES);
+    let composite: Receipt = bincode::deserialize(&composite_bytes)?;
+    assert!(matches!(&composite.inner, InnerReceipt::Composite(_)));
+    composite.verify(REVIEWED_REFERENCE_GUEST_ID)?;
+
+    let claim = deterministic_claim();
+    let native_journal = claim.validate().unwrap();
+    let effects = TransferV2Effects::decode_canonical(&claim.canonical_effects)?;
+    let verified_composite = verify_transfer_v2(effects.public_inputs_digest(), &composite_bytes)?;
+    assert_eq!(verified_composite, native_journal);
+
+    let compression_started = Instant::now();
+    let succinct = default_prover().compress(&ProverOpts::succinct(), &composite)?;
+    let compression_elapsed_ms = compression_started.elapsed().as_millis();
+    assert!(matches!(&succinct.inner, InnerReceipt::Succinct(_)));
+    succinct.verify(REVIEWED_REFERENCE_GUEST_ID)?;
+    assert_eq!(succinct.journal.bytes, composite.journal.bytes);
+
+    let succinct_bytes = bincode::serialize(&succinct)?;
+    let verified_succinct = verify_transfer_v2(effects.public_inputs_digest(), &succinct_bytes)?;
+    assert_eq!(verified_succinct, native_journal);
+
+    let mut wrong_digest = effects.public_inputs_digest().into_bytes();
+    wrong_digest[0] ^= 1;
+    assert!(matches!(
+        verify_transfer_v2(PublicInputDigest::new(wrong_digest), &succinct_bytes),
+        Err(ZkBackendError::PublicInputMismatch)
+    ));
+    let mut mutated = succinct_bytes.clone();
+    let mutation_index = mutated.len() / 2;
+    mutated[mutation_index] ^= 1;
+    assert!(verify_transfer_v2(effects.public_inputs_digest(), &mutated).is_err());
+    assert!(
+        verify_transfer_v2(
+            effects.public_inputs_digest(),
+            &succinct_bytes[..succinct_bytes.len() - 1],
+        )
+        .is_err()
+    );
+
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output_path)?;
+    output.write_all(&succinct_bytes)?;
+    output.sync_all()?;
+    drop(output);
+
+    let reopened = std::fs::read(&output_path)?;
+    assert_eq!(reopened, succinct_bytes);
+    assert_eq!(
+        verify_transfer_v2(effects.public_inputs_digest(), &reopened)?,
+        native_journal
+    );
+
+    println!("guest_id={}", encode_hex(&REVIEWED_REFERENCE_GUEST_ID));
+    println!("public_inputs={}", effects.public_inputs_digest());
+    println!("input_receipt_kind=composite");
+    println!("input_receipt_bytes={}", composite_bytes.len());
+    println!("output_receipt_kind=succinct");
+    println!("output_receipt_bytes={}", succinct_bytes.len());
+    println!("compression_elapsed_ms={compression_elapsed_ms}");
+    println!(
+        "protocol_size_compatible={}",
+        succinct_bytes.len() <= MAX_PROOF_BYTES
+    );
     Ok(())
 }
 

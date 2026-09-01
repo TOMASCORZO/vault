@@ -1,6 +1,6 @@
 # Vault Project Handoff
 
-**Updated:** 2026-08-31
+**Updated:** 2026-09-01
 **Current milestone:** H1 — private-transfer production foundation  
 **Maturity:** production-intent, not activated, not safe for real funds
 
@@ -155,10 +155,11 @@ tests, and the applicable A1-A4 hardening tasks.
 
 One cryptographic evidence item is still genuinely open:
 
-1. C6 needs a planned repeated comparative benchmark of at least two maintained
-   proof implementations, including peak memory, concurrency, and all buckets.
-   The existing Ryzen measurements are engineering evidence, not that final
-   benchmark. It can be scheduled later on declared comparable hardware.
+1. C6 still needs persistent Halo2 key-load measurement and the prepared RISC
+   Zero Succinct decision run. If Succinct fails the hard proof-size bound, the
+   RISC Zero branch ends by documented rejection. If it fits, repeated
+   2/4/8/16-action RISC Zero memory and concurrency measurements remain before
+   comparative closure.
 
 Do not mark C6 or A5 complete merely because implementation continues
 successfully on the M1. External audit is optional and is not a closure gate;
@@ -174,6 +175,18 @@ procedure completed on an NVIDIA H100. It produced the C1 receipt documented in
 `docs/evidence/C1_RISC0_CUDA_2026-08-31.md`; C1 is complete at the
 implementation-evidence boundary. The release asset and offline negative-vector
 package complete C4; do not restart proving.
+
+C6 is now in progress with reproducible local evidence. Halo2 has three real
+release measurements for each 2/4/8/16-action bucket on the Apple M1, plus a
+two-worker 16-action concurrency measurement and process peak-RSS capture. The
+raw CSV and interpretation are in
+`docs/evidence/C6_PROOF_BENCHMARK_2026-08-31.md`. A separate fail-closed CUDA
+procedure in `docs/runbooks/C6_RISC0_SUCCINCT_CUDA.md` is prepared to compress
+the already published Composite receipt into a Succinct receipt without
+repeating base proving. It verifies the same reviewed guest and journal,
+reopens the output, rejects mutations, and records VRAM, host RSS, time, size,
+and the 2 MiB compatibility decision. This compression has not been run; do not
+report a Succinct size or C6 closure until external evidence exists.
 
 ## H1 scope correction
 
