@@ -1557,6 +1557,79 @@ mod tests {
         (format!("{:?}", pk.get_vk().pinned()), public, proof)
     }
 
+    fn benchmark_real_bucket<const N: usize>(repetitions: usize) {
+        for repetition in 1..=repetitions {
+            let prepared = valid_bucket::<N>();
+            let circuit = prepared.circuit();
+            let empty_circuit = circuit.without_witnesses();
+            let public = prepared.public_inputs();
+            let public_columns = public.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            let proof_instances = [&public_columns[..]];
+
+            let keygen_started = Instant::now();
+            let params: Params<EqAffine> = Params::new(VAULT_TRANSFER_K);
+            let vk = keygen_vk(&params, &empty_circuit).expect("benchmark verifying key");
+            let pk = keygen_pk(&params, vk, &empty_circuit).expect("benchmark proving key");
+            let keygen_ms = keygen_started.elapsed().as_millis();
+
+            let proving_started = Instant::now();
+            let mut transcript =
+                Blake2bWrite::<Vec<u8>, EqAffine, Challenge255<EqAffine>>::init(vec![]);
+            create_proof(
+                &params,
+                &pk,
+                &[circuit],
+                &proof_instances,
+                ChaCha20Rng::from_seed([u8::try_from(N).unwrap(); 32]),
+                &mut transcript,
+            )
+            .expect("benchmark proof generation");
+            let proof = transcript.finalize();
+            let proving_ms = proving_started.elapsed().as_millis();
+
+            let verification_started = Instant::now();
+            let strategy = SingleVerifier::new(&params);
+            let mut transcript =
+                Blake2bRead::<&[u8], EqAffine, Challenge255<EqAffine>>::init(&proof);
+            verify_proof(
+                &params,
+                pk.get_vk(),
+                strategy,
+                &proof_instances,
+                &mut transcript,
+            )
+            .expect("benchmark proof verification");
+            let verification_us = verification_started.elapsed().as_micros();
+
+            eprintln!(
+                "VAULT_C6_METRIC backend=halo2 bucket={N} repetition={repetition} keygen_ms={keygen_ms} prove_ms={proving_ms} verify_us={verification_us} proof_bytes={}",
+                proof.len()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "C6 benchmark runs only through scripts/benchmark-zk-c6-halo2-macos.sh"]
+    fn c6_halo2_bucket_benchmark() {
+        let bucket = std::env::var("VAULT_C6_BUCKET")
+            .expect("VAULT_C6_BUCKET must select 2, 4, 8, or 16")
+            .parse::<usize>()
+            .expect("VAULT_C6_BUCKET must be an integer");
+        let repetitions = std::env::var("VAULT_C6_REPETITIONS")
+            .unwrap_or_else(|_| "3".to_owned())
+            .parse::<usize>()
+            .expect("VAULT_C6_REPETITIONS must be an integer");
+        assert!((1..=20).contains(&repetitions));
+
+        match bucket {
+            2 => benchmark_real_bucket::<2>(repetitions),
+            4 => benchmark_real_bucket::<4>(repetitions),
+            8 => benchmark_real_bucket::<8>(repetitions),
+            16 => benchmark_real_bucket::<16>(repetitions),
+            _ => panic!("VAULT_C6_BUCKET must select 2, 4, 8, or 16"),
+        }
+    }
+
     #[test]
     #[cfg_attr(
         debug_assertions,

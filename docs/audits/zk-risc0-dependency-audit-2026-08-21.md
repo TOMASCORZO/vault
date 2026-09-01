@@ -84,7 +84,7 @@ RustSec vulnerability. Upgrading RISC Zero or Arkworks requires:
 3. native/guest transcript differential tests;
 4. regeneration of image ID and proof vectors;
 5. malformed-receipt and development-mode tests;
-6. a fresh performance benchmark and external cryptography review.
+6. a fresh performance benchmark and documented project security review.
 
 Reproduce both scans with `./scripts/audit-zk-risc0.sh`. A nonzero exit is
 expected until the blockers above are resolved; it must never be allowlisted
