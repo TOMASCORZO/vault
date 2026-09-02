@@ -2,8 +2,8 @@
 
 **Status:** production-intent typed seed-import boundary, deterministic account
 discovery, finalized target, durable progress, and birthday-frontier initialization
-implemented; authenticated birthday-checkpoint distribution is implemented;
-platform custody, target distribution, operational UX, fault injection, and
+implemented; authenticated birthday and target distribution are implemented;
+platform custody, publisher operations, operational UX, fault injection, and
 internal security review remain activation gates
 **Last updated:** 2026-09-02
 
@@ -85,7 +85,7 @@ tip. Every non-genesis start must use `create_from_recovery_plan`; there is no
 lower-level birthday creation API that can bypass account and completeness
 tracking.
 
-### 2.1 Authenticated birthday-checkpoint distribution
+### 2.1 Authenticated checkpoint distribution
 
 `CheckpointDistributionDraft` encodes a validated birthday frontier and its
 claimed finalized boundary as:
@@ -116,8 +116,24 @@ Publisher threshold authenticates distribution only. The verifier also requires
 an independently consensus-verified `FinalizedCompactBlockHeader` whose network,
 height, block hash, post-tree size, and post-tree root exactly match the package.
 Provider or publisher agreement is never promoted to consensus finality. Target
-checkpoint distribution and operational publisher rotation/revocation remain
-open.
+checkpoints use a distinct signing domain and omit the birthday frontier:
+
+```text
+"VTARG001" || chain_id_32 || height_be64 || block_hash_32 ||
+tree_size_be64 || tree_root_32
+```
+
+`verify_recovery_target_distribution` applies the same threshold and exact
+independent-finality checks. Its result can enter
+`WalletRecoveryPlan::new_with_authenticated_target`; the birthday and target
+types cannot be interchanged.
+
+`CheckpointTrustPolicy::rotated` requires a strictly increasing local policy
+generation and replaces the complete publisher set. Removed keys immediately
+fail as unknown under the successor policy. Persisting the current generation
+in rollback-resistant platform storage and authenticating policy delivery remain
+operational gates; selecting an older policy would otherwise re-enable revoked
+keys.
 
 The deterministic empty-frontier two-of-three test package is 347 bytes and has
 BLAKE3 hash
@@ -267,10 +283,11 @@ Still required before real funds:
 
 - concrete approved platform/hardware custody, hardware-backed derivation,
   memory locking, crash-dump policy, and an offline recovery-package ceremony;
-- target-checkpoint distribution, operational birthday-publisher
-  rotation/revocation, and a conservative user-facing override ceremony (the
-  threshold-authenticated birthday format and independent-finality match are
-  implemented);
+- authenticated publisher-policy delivery, rollback-resistant policy-generation
+  storage, operational rotation/revocation drills, and a conservative
+  user-facing override ceremony (birthday and target package formats,
+  threshold verification, independent-finality matching, and successor-policy
+  key removal are implemented);
 - a concrete validating full-node/light-client source plus private/padded
   compact-block transport; ordinary RPC agreement is not consensus finality;
 - reviewed product UX that never presents incomplete recovery as final;

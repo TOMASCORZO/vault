@@ -226,10 +226,10 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   compact bytes against externally verified finalized headers and resumes from
   durable state, but does not yet supply the consensus-verifying or private
   network adapter. The typed/checksummed seed-import boundary is implemented;
-  threshold-authenticated birthday distribution now requires an independently
-  finalized matching header; concrete platform/hardware custody, target
-  distribution and publisher operations, policy above the current range, backup
-  operations, migrations, secure key and
+  distinct threshold-authenticated birthday and target distribution now require
+  independently finalized matching headers; concrete platform/hardware custody,
+  publisher-policy delivery and rollback protection, policy above the current
+  range, backup operations, migrations, secure key and
   rollback-counter storage, long-history
   pruning/growth, private retrieval, crash injection, benchmarks, and
   side-channel review remain open.

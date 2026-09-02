@@ -74,12 +74,14 @@ The repository contains substantial production-intent H1 work, including:
   peer registry, and crash-consistent Unix replay protection.
 
 The latest completed A1 sub-blocks are the typed seed boundary in
-`crates/vault-wallet/src/custody.rs` and threshold-authenticated birthday
-distribution in `crates/vault-wallet/src/checkpoint_distribution.rs`. A package
-is accepted only when it also matches an independently consensus-verified
-header; publisher quorum is not finality. Target distribution, publisher
-operations, concrete custodians, and the production full-node/light-client
-adapter remain open, so A1 is not complete.
+`crates/vault-wallet/src/custody.rs` and distinct threshold-authenticated
+birthday/target distribution in
+`crates/vault-wallet/src/checkpoint_distribution.rs`. A package is accepted only
+when it also matches an independently consensus-verified header; publisher
+quorum is not finality. Successor policies remove revoked keys under a monotonic
+generation, but authenticated policy delivery and rollback-resistant generation
+storage, concrete custodians, and the production full-node/light-client adapter
+remain open, so A1 is not complete.
 
 The bounded C1-C6 cryptographic workstreams are complete at the boundaries in
 `docs/H1_CLOSURE_MATRIX.md`. The isolated RISC Zero core has a versioned

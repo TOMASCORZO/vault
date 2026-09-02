@@ -189,9 +189,9 @@ This implementation is not release-ready. H1 still requires:
 
 - hardware/keychain root-key handling and a monotonic rollback counter;
 - concrete platform/hardware seed custody and its operational ceremony (the
-  typed/checksummed import boundary is implemented), target-checkpoint
-  distribution and publisher operations (the authenticated birthday-package
-  boundary is implemented),
+  typed/checksummed import boundary is implemented), publisher-policy delivery
+  and rollback-resistant generation storage (authenticated birthday/target
+  packages and successor key removal are implemented),
   a validating full-node/light-client recovery source, private retrieval,
   product incomplete-recovery UX, policy above 64 accounts, backup rotation,
   restore drills, multi-copy inventory,

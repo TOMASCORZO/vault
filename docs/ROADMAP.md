@@ -99,9 +99,10 @@ later milestones do not expand H1 cryptographic implementation.
 - [ ] Complete concrete platform/hardware seed custody and its operational
   ceremony (the typed 32-byte seed boundary, checksummed offline package, and
   scoped custodian callback are implemented), trusted birthday and target
-  checkpoint distribution (threshold-authenticated birthday packages with an
-  independent-finality match are implemented; target packages, publisher
-  operations, and the real H2 validating adapter remain),
+  checkpoint distribution (separate threshold-authenticated birthday/target
+  packages, independent-finality matching, and monotonic successor policies are
+  implemented; operational policy delivery/rollback storage and the real H2
+  validating adapter remain),
   private/padded retrieval, product incomplete-recovery UX, backup rotation and restore drills,
   versioned migrations, checkpoint pruning/compaction and long-history growth,
   keychain/secure-element key plus rollback state, multi-platform stores,

@@ -162,9 +162,9 @@ and atomic with the tip. The bounded synchronization coordinator specified in
 the next durable height, requires an externally consensus-verified header,
 authenticates hostile compact bytes, and commits before advancing. The
 typed/checksummed seed-import boundary is implemented; concrete platform/hardware
-custody, a validating node/light-client adapter, target-checkpoint distribution
-and publisher operations (the authenticated birthday-package boundary is
-implemented), backup operations/drills, migrations,
+custody, a validating node/light-client adapter, publisher-policy delivery and
+rollback protection (authenticated birthday/target packages and successor key
+removal are implemented), backup operations/drills, migrations,
 hardware/keychain root-key and rollback state, exhaustive crash/power-loss
 injection, long-history pruning and growth measurements,
 file-size/access-pattern mitigation, private block retrieval, side-channel

@@ -16,9 +16,10 @@ mod recovery;
 mod storage;
 
 pub use checkpoint_distribution::{
-    CheckpointDistributionDraft, CheckpointDistributionError, CheckpointPublisherSignature,
-    CheckpointTrustPolicy, MAX_CHECKPOINT_PUBLISHERS, checkpoint_publisher_id,
-    verify_birthday_checkpoint_distribution,
+    AuthenticatedRecoveryTarget, CheckpointDistributionDraft, CheckpointDistributionError,
+    CheckpointPublisherSignature, CheckpointTrustPolicy, MAX_CHECKPOINT_PUBLISHERS,
+    RecoveryTargetDistributionDraft, checkpoint_publisher_id,
+    verify_birthday_checkpoint_distribution, verify_recovery_target_distribution,
 };
 pub use custody::{
     WALLET_SEED_ENTROPY_BYTES, WALLET_SEED_RECOVERY_PACKAGE_BYTES, WalletSeedCustodian,
@@ -657,6 +658,17 @@ impl WalletRecoveryPlan {
             gap_limit: u8::try_from(gap_limit)
                 .expect("validated recovery gap fits canonical encoding"),
         })
+    }
+
+    /// Creates a recovery contract from a target authenticated by checkpoint
+    /// publishers and independently matched to consensus-finalized state.
+    pub fn new_with_authenticated_target(
+        checkpoint: WalletBirthdayCheckpoint,
+        target: &AuthenticatedRecoveryTarget,
+        accounts: &WalletRecoveryAccounts,
+        gap_limit: usize,
+    ) -> Result<Self, WalletRecoveryError> {
+        Self::new(checkpoint, target.finalized_header(), accounts, gap_limit)
     }
 
     /// Finalized birthday immediately before scanning begins.

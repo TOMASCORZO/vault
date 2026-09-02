@@ -13,9 +13,11 @@ use vault_protocol::{ChainId, FinalizedCompactBlockHeader};
 use crate::WalletBirthdayCheckpoint;
 
 const CHECKPOINT_MAGIC: [u8; 8] = *b"VCKPT001";
+const TARGET_MAGIC: [u8; 8] = *b"VTARG001";
 const CHECKPOINT_PUBLISHER_ID_DOMAIN: &str = "vault.wallet.checkpoint-publisher-id-v1.2026-09-02";
 const MAX_FRONTIER_OMMERS: usize = 32;
 const FIXED_SIGNING_BYTES: usize = 8 + 32 + 8 + 32 + 8 + 32 + 1 + 32 + 1;
+const TARGET_SIGNING_BYTES: usize = 8 + 32 + 8 + 32 + 8 + 32;
 const SIGNATURE_RECORD_BYTES: usize = 32 + 64;
 const MAX_CHECKPOINT_DISTRIBUTION_BYTES: usize = FIXED_SIGNING_BYTES
     + MAX_FRONTIER_OMMERS * 32
@@ -65,6 +67,7 @@ struct TrustedPublisher {
 /// Separately configured publisher keys and threshold for one Vault network.
 pub struct CheckpointTrustPolicy {
     chain_id: ChainId,
+    generation: u64,
     threshold: usize,
     publishers: Vec<TrustedPublisher>,
 }
@@ -74,6 +77,7 @@ impl fmt::Debug for CheckpointTrustPolicy {
         formatter
             .debug_struct("CheckpointTrustPolicy")
             .field("chain_id", &self.chain_id)
+            .field("generation", &self.generation)
             .field("threshold", &self.threshold)
             .field("publisher_count", &self.publishers.len())
             .finish()
@@ -87,7 +91,37 @@ impl CheckpointTrustPolicy {
         threshold: usize,
         publisher_keys: Vec<[u8; 32]>,
     ) -> Result<Self, CheckpointDistributionError> {
+        Self::new_at_generation(chain_id, 1, threshold, publisher_keys)
+    }
+
+    /// Replaces the complete publisher set at a strictly newer policy generation.
+    /// Keys omitted from the successor are revoked for all later verification.
+    pub fn rotated(
+        &self,
+        next_generation: u64,
+        threshold: usize,
+        publisher_keys: Vec<[u8; 32]>,
+    ) -> Result<Self, CheckpointDistributionError> {
+        if next_generation <= self.generation {
+            return Err(CheckpointDistributionError::InvalidPolicy);
+        }
+        Self::new_at_generation(self.chain_id, next_generation, threshold, publisher_keys)
+    }
+
+    /// Monotonic policy generation that platform storage must protect from rollback.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    fn new_at_generation(
+        chain_id: ChainId,
+        generation: u64,
+        threshold: usize,
+        publisher_keys: Vec<[u8; 32]>,
+    ) -> Result<Self, CheckpointDistributionError> {
         if chain_id.is_zero()
+            || generation == 0
             || publisher_keys.is_empty()
             || publisher_keys.len() > MAX_CHECKPOINT_PUBLISHERS
             || threshold == 0
@@ -115,6 +149,7 @@ impl CheckpointTrustPolicy {
         }
         Ok(Self {
             chain_id,
+            generation,
             threshold,
             publishers,
         })
@@ -207,29 +242,96 @@ impl CheckpointDistributionDraft {
     /// Canonically orders and appends bounded publisher signature records.
     pub fn assemble(
         self,
-        mut signatures: Vec<CheckpointPublisherSignature>,
+        signatures: Vec<CheckpointPublisherSignature>,
     ) -> Result<Vec<u8>, CheckpointDistributionError> {
-        if signatures.is_empty() || signatures.len() > MAX_CHECKPOINT_PUBLISHERS {
-            return Err(CheckpointDistributionError::InvalidEncoding);
-        }
-        signatures.sort_unstable_by_key(|signature| signature.publisher_id);
-        if signatures
-            .windows(2)
-            .any(|pair| pair[0].publisher_id == pair[1].publisher_id)
-        {
-            return Err(CheckpointDistributionError::AuthenticationFailed);
-        }
-        let mut package = self.signing_bytes;
-        package.push(
-            u8::try_from(signatures.len())
-                .map_err(|_| CheckpointDistributionError::InvalidEncoding)?,
-        );
-        for signature in signatures {
-            package.extend_from_slice(&signature.publisher_id);
-            package.extend_from_slice(&signature.signature);
-        }
-        Ok(package)
+        assemble_signed_package(self.signing_bytes, signatures)
     }
+}
+
+/// Validated unsigned recovery-target bytes awaiting publisher signatures.
+pub struct RecoveryTargetDistributionDraft {
+    signing_bytes: Vec<u8>,
+}
+
+impl fmt::Debug for RecoveryTargetDistributionDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RecoveryTargetDistributionDraft")
+            .field("signing_bytes", &self.signing_bytes.len())
+            .finish()
+    }
+}
+
+impl RecoveryTargetDistributionDraft {
+    /// Encodes the exact target boundary asserted by a finalized header.
+    pub fn new(header: &FinalizedCompactBlockHeader) -> Self {
+        let mut bytes = Vec::with_capacity(TARGET_SIGNING_BYTES);
+        bytes.extend_from_slice(&TARGET_MAGIC);
+        bytes.extend_from_slice(header.chain_id().as_bytes());
+        bytes.extend_from_slice(&header.height().to_be_bytes());
+        bytes.extend_from_slice(&header.block_hash());
+        bytes.extend_from_slice(&header.post_tree_size().to_be_bytes());
+        bytes.extend_from_slice(&header.post_tree_root().to_bytes());
+        Self {
+            signing_bytes: bytes,
+        }
+    }
+
+    /// Exact domain/version-bound bytes each publisher must sign.
+    #[must_use]
+    pub fn signing_bytes(&self) -> &[u8] {
+        &self.signing_bytes
+    }
+
+    /// Canonically orders and appends bounded publisher signature records.
+    pub fn assemble(
+        self,
+        signatures: Vec<CheckpointPublisherSignature>,
+    ) -> Result<Vec<u8>, CheckpointDistributionError> {
+        assemble_signed_package(self.signing_bytes, signatures)
+    }
+}
+
+/// Recovery target authenticated by publishers and matched to independent finality.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuthenticatedRecoveryTarget {
+    header: FinalizedCompactBlockHeader,
+}
+
+impl AuthenticatedRecoveryTarget {
+    /// Exact finalized target height.
+    #[must_use]
+    pub const fn height(&self) -> u64 {
+        self.header.height()
+    }
+
+    pub(crate) const fn finalized_header(&self) -> &FinalizedCompactBlockHeader {
+        &self.header
+    }
+}
+
+fn assemble_signed_package(
+    mut signing_bytes: Vec<u8>,
+    mut signatures: Vec<CheckpointPublisherSignature>,
+) -> Result<Vec<u8>, CheckpointDistributionError> {
+    if signatures.is_empty() || signatures.len() > MAX_CHECKPOINT_PUBLISHERS {
+        return Err(CheckpointDistributionError::InvalidEncoding);
+    }
+    signatures.sort_unstable_by_key(|signature| signature.publisher_id);
+    if signatures
+        .windows(2)
+        .any(|pair| pair[0].publisher_id == pair[1].publisher_id)
+    {
+        return Err(CheckpointDistributionError::AuthenticationFailed);
+    }
+    signing_bytes.push(
+        u8::try_from(signatures.len()).map_err(|_| CheckpointDistributionError::InvalidEncoding)?,
+    );
+    for signature in signatures {
+        signing_bytes.extend_from_slice(&signature.publisher_id);
+        signing_bytes.extend_from_slice(&signature.signature);
+    }
+    Ok(signing_bytes)
 }
 
 /// Verifies publisher threshold and exact correspondence with consensus-finalized state.
@@ -272,6 +374,75 @@ pub fn verify_birthday_checkpoint_distribution(
         ommers.push(reader.take()?);
     }
     let signing_end = reader.position();
+    verify_signature_records(package, signing_end, &mut reader, policy)?;
+
+    let snapshot = NoteTreeSnapshot::from_parts(tree_size, leaf, ommers);
+    let tree = NoteCommitmentTree::restore(&snapshot)
+        .map_err(|_| CheckpointDistributionError::InvalidEncoding)?;
+    if tree.size() != tree_size || tree.typed_root() != tree_root {
+        return Err(CheckpointDistributionError::InvalidEncoding);
+    }
+    if finalized_header.chain_id() != chain_id
+        || finalized_header.height() != height
+        || finalized_header.block_hash() != block_hash
+        || finalized_header.post_tree_size() != tree_size
+        || finalized_header.post_tree_root() != tree_root
+    {
+        return Err(CheckpointDistributionError::FinalizedHeaderMismatch);
+    }
+    WalletBirthdayCheckpoint::from_finalized_header(finalized_header, &snapshot)
+        .map_err(|_| CheckpointDistributionError::FinalizedHeaderMismatch)
+}
+
+/// Verifies a distributed recovery target against both publishers and finality.
+pub fn verify_recovery_target_distribution(
+    package: &[u8],
+    policy: &CheckpointTrustPolicy,
+    finalized_header: &FinalizedCompactBlockHeader,
+) -> Result<AuthenticatedRecoveryTarget, CheckpointDistributionError> {
+    let maximum_bytes =
+        TARGET_SIGNING_BYTES + 1 + MAX_CHECKPOINT_PUBLISHERS * SIGNATURE_RECORD_BYTES;
+    if package.len() < TARGET_SIGNING_BYTES + 1 + SIGNATURE_RECORD_BYTES
+        || package.len() > maximum_bytes
+    {
+        return Err(CheckpointDistributionError::InvalidEncoding);
+    }
+    let mut reader = Reader::new(package);
+    if reader.take::<8>()? != TARGET_MAGIC {
+        return Err(CheckpointDistributionError::InvalidEncoding);
+    }
+    let chain_id = ChainId::new(reader.take()?);
+    if chain_id != policy.chain_id {
+        return Err(CheckpointDistributionError::WrongNetwork);
+    }
+    let height = u64::from_be_bytes(reader.take()?);
+    let block_hash = reader.take()?;
+    let tree_size = u64::from_be_bytes(reader.take()?);
+    let tree_root = NoteTreeRoot::from_bytes(reader.take()?)
+        .map_err(|_| CheckpointDistributionError::InvalidEncoding)?;
+    let signing_end = reader.position();
+    debug_assert_eq!(signing_end, TARGET_SIGNING_BYTES);
+    verify_signature_records(package, signing_end, &mut reader, policy)?;
+
+    if finalized_header.chain_id() != chain_id
+        || finalized_header.height() != height
+        || finalized_header.block_hash() != block_hash
+        || finalized_header.post_tree_size() != tree_size
+        || finalized_header.post_tree_root() != tree_root
+    {
+        return Err(CheckpointDistributionError::FinalizedHeaderMismatch);
+    }
+    Ok(AuthenticatedRecoveryTarget {
+        header: *finalized_header,
+    })
+}
+
+fn verify_signature_records(
+    package: &[u8],
+    signing_end: usize,
+    reader: &mut Reader<'_>,
+    policy: &CheckpointTrustPolicy,
+) -> Result<(), CheckpointDistributionError> {
     let signature_count = usize::from(reader.take::<1>()?[0]);
     if signature_count == 0
         || signature_count > MAX_CHECKPOINT_PUBLISHERS
@@ -303,23 +474,7 @@ pub fn verify_birthday_checkpoint_distribution(
     if reader.remaining() != 0 {
         return Err(CheckpointDistributionError::InvalidEncoding);
     }
-
-    let snapshot = NoteTreeSnapshot::from_parts(tree_size, leaf, ommers);
-    let tree = NoteCommitmentTree::restore(&snapshot)
-        .map_err(|_| CheckpointDistributionError::InvalidEncoding)?;
-    if tree.size() != tree_size || tree.typed_root() != tree_root {
-        return Err(CheckpointDistributionError::InvalidEncoding);
-    }
-    if finalized_header.chain_id() != chain_id
-        || finalized_header.height() != height
-        || finalized_header.block_hash() != block_hash
-        || finalized_header.post_tree_size() != tree_size
-        || finalized_header.post_tree_root() != tree_root
-    {
-        return Err(CheckpointDistributionError::FinalizedHeaderMismatch);
-    }
-    WalletBirthdayCheckpoint::from_finalized_header(finalized_header, &snapshot)
-        .map_err(|_| CheckpointDistributionError::FinalizedHeaderMismatch)
+    Ok(())
 }
 
 struct Reader<'a> {
@@ -361,16 +516,18 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
     use vault_privacy::NoteCommitmentTree;
     use vault_protocol::CompactBlockCommitment;
+    use zeroize::Zeroizing;
 
     use super::*;
+    use crate::{WalletRecoveryAccounts, WalletRecoveryPlan, WalletSeedMaterial};
 
     const NETWORK: [u8; 32] = [0x71; 32];
 
-    fn header(block_hash: [u8; 32]) -> FinalizedCompactBlockHeader {
+    fn header_at(height: u64, block_hash: [u8; 32]) -> FinalizedCompactBlockHeader {
         let empty_root = NoteCommitmentTree::new().typed_root();
         FinalizedCompactBlockHeader::from_verified_consensus(
             ChainId::new(NETWORK),
-            100,
+            height,
             block_hash,
             [0x73; 32],
             0,
@@ -382,22 +539,33 @@ mod tests {
         .unwrap()
     }
 
+    fn header(block_hash: [u8; 32]) -> FinalizedCompactBlockHeader {
+        header_at(100, block_hash)
+    }
+
+    fn signatures(
+        signing_bytes: &[u8],
+        signing_keys: &[SigningKey],
+    ) -> Vec<CheckpointPublisherSignature> {
+        signing_keys
+            .iter()
+            .map(|key| {
+                CheckpointPublisherSignature::new(
+                    checkpoint_publisher_id(key.verifying_key().to_bytes()),
+                    key.sign(signing_bytes).to_bytes(),
+                )
+            })
+            .collect()
+    }
+
     fn signed_package(
         header: &FinalizedCompactBlockHeader,
         signing_keys: &[SigningKey],
     ) -> Vec<u8> {
         let draft = CheckpointDistributionDraft::new(header, &NoteCommitmentTree::new().snapshot())
             .unwrap();
-        let signatures = signing_keys
-            .iter()
-            .map(|key| {
-                CheckpointPublisherSignature::new(
-                    checkpoint_publisher_id(key.verifying_key().to_bytes()),
-                    key.sign(draft.signing_bytes()).to_bytes(),
-                )
-            })
-            .collect();
-        draft.assemble(signatures).unwrap()
+        let signed = signatures(draft.signing_bytes(), signing_keys);
+        draft.assemble(signed).unwrap()
     }
 
     #[test]
@@ -509,5 +677,113 @@ mod tests {
             draft.assemble(vec![signature, signature]).unwrap_err(),
             CheckpointDistributionError::AuthenticationFailed
         );
+    }
+
+    #[test]
+    fn target_distribution_is_distinct_and_requires_the_exact_finalized_target() {
+        let keys = [
+            SigningKey::from_bytes(&[8; 32]),
+            SigningKey::from_bytes(&[9; 32]),
+            SigningKey::from_bytes(&[10; 32]),
+        ];
+        let policy = CheckpointTrustPolicy::new(
+            ChainId::new(NETWORK),
+            2,
+            keys.iter()
+                .map(|key| key.verifying_key().to_bytes())
+                .collect(),
+        )
+        .unwrap();
+        let finalized_target = header_at(200, [0x81; 32]);
+        let draft = RecoveryTargetDistributionDraft::new(&finalized_target);
+        let signed = signatures(draft.signing_bytes(), &keys[..2]);
+        let package = draft.assemble(signed).unwrap();
+        assert_eq!(package.len(), 313);
+        let authenticated =
+            verify_recovery_target_distribution(&package, &policy, &finalized_target).unwrap();
+        assert_eq!(authenticated.height(), 200);
+
+        let birthday_header = header_at(100, [0x80; 32]);
+        let birthday_package = signed_package(&birthday_header, &keys[..2]);
+        let birthday =
+            verify_birthday_checkpoint_distribution(&birthday_package, &policy, &birthday_header)
+                .unwrap();
+        let seed = WalletSeedMaterial::from_custodian_entropy(Zeroizing::new([0x91; 32])).unwrap();
+        let accounts = WalletRecoveryAccounts::derive(&seed, ChainId::new(NETWORK), 3).unwrap();
+        let plan = WalletRecoveryPlan::new_with_authenticated_target(
+            birthday,
+            &authenticated,
+            &accounts,
+            2,
+        )
+        .unwrap();
+        assert_eq!(plan.target_height(), 200);
+
+        for index in 0..package.len() {
+            let mut mutated = package.clone();
+            mutated[index] ^= 1;
+            assert!(
+                verify_recovery_target_distribution(&mutated, &policy, &finalized_target).is_err(),
+                "target mutation at byte {index} was accepted"
+            );
+        }
+        assert_eq!(
+            verify_recovery_target_distribution(&package, &policy, &header_at(200, [0x82; 32]))
+                .unwrap_err(),
+            CheckpointDistributionError::FinalizedHeaderMismatch
+        );
+    }
+
+    #[test]
+    fn successor_policy_revokes_removed_publishers_and_rejects_rollback() {
+        let old_only = SigningKey::from_bytes(&[11; 32]);
+        let retained = SigningKey::from_bytes(&[12; 32]);
+        let added = SigningKey::from_bytes(&[13; 32]);
+        let old_policy = CheckpointTrustPolicy::new(
+            ChainId::new(NETWORK),
+            2,
+            vec![
+                old_only.verifying_key().to_bytes(),
+                retained.verifying_key().to_bytes(),
+            ],
+        )
+        .unwrap();
+        let new_policy = old_policy
+            .rotated(
+                2,
+                2,
+                vec![
+                    retained.verifying_key().to_bytes(),
+                    added.verifying_key().to_bytes(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(new_policy.generation(), 2);
+        assert!(
+            old_policy
+                .rotated(
+                    1,
+                    2,
+                    vec![
+                        retained.verifying_key().to_bytes(),
+                        added.verifying_key().to_bytes(),
+                    ],
+                )
+                .is_err()
+        );
+
+        let finalized_target = header_at(300, [0x83; 32]);
+        let old_draft = RecoveryTargetDistributionDraft::new(&finalized_target);
+        let old_signatures = signatures(old_draft.signing_bytes(), &[old_only, retained.clone()]);
+        let old_package = old_draft.assemble(old_signatures).unwrap();
+        assert!(
+            verify_recovery_target_distribution(&old_package, &new_policy, &finalized_target)
+                .is_err()
+        );
+
+        let new_draft = RecoveryTargetDistributionDraft::new(&finalized_target);
+        let new_signatures = signatures(new_draft.signing_bytes(), &[retained, added]);
+        let new_package = new_draft.assemble(new_signatures).unwrap();
+        verify_recovery_target_distribution(&new_package, &new_policy, &finalized_target).unwrap();
     }
 }
