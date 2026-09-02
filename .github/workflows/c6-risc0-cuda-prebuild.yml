@@ -15,8 +15,20 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda_arch:
+          - sm_89
+          - sm_90
+          - sm_120
     container:
       image: nvidia/cuda:12.8.1-devel-ubuntu24.04
+    env:
+      # GitHub's runner exposes the CUDA toolkit but no GPU, so RISC Zero's
+      # default `-arch=native` cannot select a valid target.  Setting either
+      # supported NVCC flag variable suppresses that autodetection.
+      NVCC_PREPEND_FLAGS: -arch=${{ matrix.cuda_arch }}
     steps:
       - name: Install build dependencies
         run: |
@@ -94,6 +106,7 @@ jobs:
             echo 'guest_rust=1.97.0'
             echo 'rzup=0.5.2'
             echo 'cuda_image=nvidia/cuda:12.8.1-devel-ubuntu24.04'
+            echo 'cuda_arch=${{ matrix.cuda_arch }}'
             echo 'risc0_zkvm=3.0.6'
             echo 'reviewed_guest_id=85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128'
             echo "binary_bytes=$binary_bytes"
@@ -101,15 +114,15 @@ jobs:
           } > "$bundle_dir/build.manifest.txt"
 
           cd "$GITHUB_WORKSPACE"
-          tar -czf vault-c6-risc0-cuda-prebuild.tar.gz c6-prebuild
-          sha256sum vault-c6-risc0-cuda-prebuild.tar.gz \
-            > vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+          archive="vault-c6-risc0-cuda-prebuild-${{ matrix.cuda_arch }}.tar.gz"
+          tar -czf "$archive" c6-prebuild
+          sha256sum "$archive" > "$archive.sha256"
       - name: Upload prebuilt bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vault-c6-risc0-cuda-prebuild-${{ github.sha }}
+          name: vault-c6-risc0-cuda-prebuild-${{ matrix.cuda_arch }}-${{ github.sha }}
           path: |
-            vault-c6-risc0-cuda-prebuild.tar.gz
-            vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+            vault-c6-risc0-cuda-prebuild-${{ matrix.cuda_arch }}.tar.gz
+            vault-c6-risc0-cuda-prebuild-${{ matrix.cuda_arch }}.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30

@@ -35,11 +35,14 @@ concurrency runs for a rejected candidate.
 Never compile or install Rust on a billed GPU host.
 
 1. Push the exact source commit.
-2. Manually run `.github/workflows/c6-risc0-cuda-prebuild.yml`. It builds at the
+2. Run `.github/workflows/c6-risc0-cuda-prebuild.yml`. It builds at the
    canonical `/workspace/vault` path inside
    `nvidia/cuda:12.8.1-devel-ubuntu24.04`, reproduces the reviewed guest ID, and
-   uploads a standalone test bundle plus hashes.
-3. Download and verify that CI artifact on the development machine.
+   uploads separate standalone bundles for Ada `sm_89`, Hopper `sm_90`, and
+   Blackwell `sm_120`. Explicit targets are required because GitHub exposes no
+   GPU for RISC Zero's default `nvcc -arch=native` detection.
+3. Choose the bundle matching the exact rented GPU, then download and verify
+   that CI artifact on the development machine.
 4. Publish the verified archive as prerelease
    `c6-risc0-cuda-prebuild-v1` before starting a rental.
 5. Confirm that both release URLs below return successfully and retain their
@@ -65,6 +68,10 @@ Use one non-preemptible Linux x86_64 host with:
   12.8 image confirmed by the bundle's `ldd.txt`;
 - SSH access.
 
+Select the archive by compute capability: RTX 4090/L4/L40/L40S use `sm_89`,
+H100/H200 use `sm_90`, and RTX 5090/Blackwell use `sm_120`. Do not use a bundle
+for a different architecture; the runner rejects a mismatch before proving.
+
 The first recursion run has no measured peak VRAM, so 32 GiB is a hypothesis,
 not a guarantee. Do not use a spot/preemptible host.
 
@@ -78,8 +85,8 @@ mkdir -p /workspace/c6 /workspace/evidence
 cd /workspace/c6
 
 curl --fail --location \
-  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild.tar.gz \
-  --output vault-c6-risc0-cuda-prebuild.tar.gz &
+  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild-sm_120.tar.gz \
+  --output vault-c6-risc0-cuda-prebuild-sm_120.tar.gz &
 bundle_download_pid=$!
 curl --fail --location \
   https://github.com/TOMASCORZO/vault/releases/download/c4-risc0-transfer-v2-v1/vault-c1-transfer-v2.receipt.bin \
@@ -88,14 +95,17 @@ receipt_download_pid=$!
 wait "$bundle_download_pid" "$receipt_download_pid"
 
 curl --fail --location \
-  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild.tar.gz.sha256 \
-  --output vault-c6-risc0-cuda-prebuild.tar.gz.sha256
-sha256sum --check vault-c6-risc0-cuda-prebuild.tar.gz.sha256
+  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild-sm_120.tar.gz.sha256 \
+  --output vault-c6-risc0-cuda-prebuild-sm_120.tar.gz.sha256
+sha256sum --check vault-c6-risc0-cuda-prebuild-sm_120.tar.gz.sha256
 echo '12c952e2da0466d7047586404b15c7ad6fa59675bb8c975019b4645dca7e6e96  /workspace/evidence/vault-c1-transfer-v2.receipt.bin' |
   sha256sum --check
-tar -xzf vault-c6-risc0-cuda-prebuild.tar.gz
+tar -xzf vault-c6-risc0-cuda-prebuild-sm_120.tar.gz
 nvidia-smi
 ```
+
+The example uses `sm_120`; substitute `sm_89` or `sm_90` in all four archive
+references when that is the selected GPU's capability.
 
 Run the prebuilt test directly:
 

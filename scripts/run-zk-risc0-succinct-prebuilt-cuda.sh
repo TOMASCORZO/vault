@@ -46,6 +46,18 @@ expected_binary_sha256="$(manifest_value binary_sha256)"
 actual_binary_sha256="$(sha256sum "$binary_path" | awk '{ print $1 }')"
 [[ "$actual_binary_sha256" == "$expected_binary_sha256" ]] || fail "test binary hash mismatch"
 
+expected_cuda_arch="$(manifest_value cuda_arch)"
+[[ "$expected_cuda_arch" =~ ^sm_[0-9]+$ ]] || fail "invalid CUDA architecture in build manifest"
+gpu_compute_capability="$(
+  nvidia-smi -i "$selected_gpu" --query-gpu=compute_cap --format=csv,noheader,nounits |
+    tr -d '[:space:].' |
+    head -n 1
+)"
+[[ "$gpu_compute_capability" =~ ^[0-9]+$ ]] || fail "could not read GPU compute capability"
+actual_cuda_arch="sm_${gpu_compute_capability}"
+[[ "$actual_cuda_arch" == "$expected_cuda_arch" ]] || \
+  fail "bundle targets $expected_cuda_arch but selected GPU is $actual_cuda_arch"
+
 actual_input_bytes="$(wc -c < "$input_path" | tr -d '[:space:]')"
 [[ "$actual_input_bytes" == "$expected_input_bytes" ]] || \
   fail "input receipt has $actual_input_bytes bytes; expected $expected_input_bytes"
@@ -79,6 +91,7 @@ mkdir -p "$(dirname "$output_path")"
   echo "host=$(uname -a)"
   echo "system_memory_mib=$system_memory_mib"
   echo "cuda_visible_devices=$selected_gpu"
+  echo "cuda_arch=$actual_cuda_arch"
   echo "gpu:"
   nvidia-smi -i "$selected_gpu" \
     --query-gpu=index,name,memory.total,driver_version \
