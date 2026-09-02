@@ -2,7 +2,7 @@
 
 **Status:** specified; implementation remains production-intent and non-activatable
 **Version:** 1
-**Last updated:** 2026-08-30
+**Last updated:** 2026-09-02
 
 ## Scope
 
@@ -78,6 +78,34 @@ For each approved action bucket, release engineering MUST:
 Any change to `k`, generator derivation, transcript, dependency version, circuit
 shape, fixed columns, instance ordering, or VK creates a new suite. Silent
 parameter substitution is forbidden.
+
+### Current A4 parameter artifact
+
+`vault-zk-halo2-core::artifacts` implements the first bounded persistence layer
+for the shared monolithic parameters. Its version-1 envelope commits to the
+format version, `k = 15`, the approved suite ID, exact payload length, and the
+compile-time approved SHA-256 of `Params<EqAffine>::new(15)`. Loading checks the
+fixed file length before allocation, rejects trailing data, verifies the
+header and payload digest, and only then invokes Halo2's parameter decoder.
+
+The canonical payload is 2,097,220 bytes with SHA-256:
+
+```text
+e1fb29749c7bd0870768044d5329b4e293cb2d44dae24db2554605427b19d0dd
+```
+
+The complete Vault envelope is 2,097,306 bytes. Reproduce derivation and
+separate-process loads with
+`scripts/benchmark-zk-a4-halo2-parameters-macos.sh`; current measurements are
+recorded in `../evidence/A4_HALO2_PARAMETERS_2026-09-02.md`.
+
+This is partial A4 evidence, not A4 closure. The pinned `halo2_proofs 0.3.5`
+API exposes canonical `Params` read/write methods but does not expose stable
+VK/PK serialization. Vault therefore continues to derive VK/PK rather than
+persisting an opaque or memory-layout-dependent representation. A reviewed
+upstream format or narrowly audited fork, cross-builder reproduction, signed
+release manifest, and positive-proof correspondence test remain required before
+claiming persistent key loading.
 
 ## RISC Zero reference backend
 

@@ -156,10 +156,15 @@ Rust tests, and the applicable A1-A4 hardening tasks.
 
 No cryptographic comparison rental remains. C6 is complete and selects Halo2
 as the base-layer proof candidate. Stable Halo2 parameter/key serialization and
-cold-load measurement belong to A4 release engineering. Do not mark A5 complete
-merely because implementation continues successfully on the M1. External audit
-is optional and is not a closure gate; the project-controlled reproducible
-suites are the acceptance authority.
+cold-load measurement belong to A4 release engineering. A4 now has a canonical
+2,097,306-byte parameter envelope with a compile-time pinned SHA-256, bounded
+file loading, mutation tests, and three new-process load measurements averaging
+741.055 ms on the M1. VK/PK persistence remains open because
+`halo2_proofs 0.3.5` exposes no stable serialization API; do not substitute an
+opaque memory dump. Details are in
+`docs/evidence/A4_HALO2_PARAMETERS_2026-09-02.md`. Do not mark A4 or A5 complete.
+External audit is optional and is not a closure gate; the project-controlled
+reproducible suites are the acceptance authority.
 
 The branch now includes a host-only, opt-in `cuda-prover` feature and the
 fail-closed external-GPU procedure in

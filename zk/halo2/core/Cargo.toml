@@ -14,6 +14,7 @@ halo2_gadgets.workspace = true
 orchard.workspace = true
 pasta_curves.workspace = true
 rand_core.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 vault-burn = { path = "../../../crates/vault-burn" }
 vault-privacy = { path = "../../../crates/vault-privacy", features = ["circuit"] }

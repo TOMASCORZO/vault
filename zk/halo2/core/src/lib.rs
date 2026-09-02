@@ -19,6 +19,7 @@ use vault_protocol::{
 };
 
 pub mod accounting;
+pub mod artifacts;
 pub mod burn_binding;
 pub mod transfer_circuit;
 

@@ -6,8 +6,8 @@
 //! additionally constrained to the exact expanded receiver of its paired
 //! consumed note, while the classification bit remains private.
 //!
-//! The shape remains non-activatable: both-backend vectors, benchmarks, and
-//! independent review are still mandatory.
+//! The shape remains non-activatable while A1-A5 hardening and the explicit
+//! verifier-activation decision remain open.
 
 use ff::PrimeField;
 use halo2_proofs::{
