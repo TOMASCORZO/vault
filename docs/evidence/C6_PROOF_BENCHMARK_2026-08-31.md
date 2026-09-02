@@ -113,6 +113,12 @@ in [`../runbooks/C6_RISC0_SUCCINCT_CUDA.md`](../runbooks/C6_RISC0_SUCCINCT_CUDA.
 It reuses the published Composite receipt rather than repeating base proving.
 No Succinct measurement exists until that procedure actually completes.
 
+The prerelease `c6-risc0-cuda-prebuild-v1` contains verified standalone
+archives for Ada `sm_89` and Hopper `sm_90`, built from
+`b4482a961f95ac74f6bf981a080ab047604bb516`. The `sm_120` attempt exhausted the
+GitHub runner's RAM and is excluded; it is not required for the planned H100 or
+L40S execution.
+
 1. Run the single prebuilt Composite-to-Succinct classification gate on
    declared CUDA hardware and preserve its receipt, log, manifest, environment,
    and resource samples.

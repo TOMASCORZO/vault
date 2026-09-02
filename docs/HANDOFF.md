@@ -189,13 +189,17 @@ reopens the output, rejects mutations, and records VRAM, host RSS, time, size,
 and the 2 MiB compatibility decision. This compression has not been run; do not
 report a Succinct size or C6 closure until external evidence exists.
 
-To minimize rental cost, the repository also contains a manual GitHub Actions
-workflow that prebuilds the exact CUDA integration-test binary at the canonical
-source path. The rented host must not clone the repository, install Rust or
-compile: it downloads the prebuilt bundle and the published Composite receipt,
-runs the fail-closed preflight and compression, copies five evidence files, and
-is then destroyed. The optimized commands and 30 GiB disk profile are frozen in
-the C6 runbook.
+To minimize rental cost, the exact CUDA integration-test binaries are already
+published in prerelease `c6-risc0-cuda-prebuild-v1` for Ada `sm_89` and Hopper
+`sm_90`, from source commit
+`b4482a961f95ac74f6bf981a080ab047604bb516`. Their CI builds and archive hashes
+passed. Blackwell `sm_120` is not published because its single `nvcc` process
+exceeded the GitHub runner's RAM; this does not block the planned H100/H200 or
+L40/L40S run. The rented host must not clone the repository, install Rust or
+compile: it downloads the matching prebuilt bundle and published Composite
+receipt, runs the fail-closed preflight and compression, copies five evidence
+files, and is then destroyed. The optimized commands and 30 GiB disk profile
+are frozen in the C6 runbook.
 
 ## H1 scope correction
 
