@@ -18,10 +18,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cuda_arch:
-          - sm_89
-          - sm_90
-          - sm_120
+        include:
+          - cuda_arch: sm_89
+            cargo_jobs: 4
+          - cuda_arch: sm_90
+            cargo_jobs: 4
+          - cuda_arch: sm_120
+            cargo_jobs: 1
     container:
       image: nvidia/cuda:12.8.1-devel-ubuntu24.04
     env:
@@ -29,6 +32,7 @@ jobs:
       # default `-arch=native` cannot select a valid target.  Setting either
       # supported NVCC flag variable suppresses that autodetection.
       NVCC_PREPEND_FLAGS: -arch=${{ matrix.cuda_arch }}
+      CARGO_BUILD_JOBS: ${{ matrix.cargo_jobs }}
     steps:
       - name: Install build dependencies
         run: |
@@ -96,7 +100,7 @@ jobs:
           ldd "$bundle_dir/vault-c6-risc0-succinct-test" \
             > "$bundle_dir/ldd.txt"
 
-          source_commit="$(git -C /workspace/vault rev-parse HEAD)"
+          source_commit="${GITHUB_SHA}"
           binary_sha256="$(sha256sum "$bundle_dir/vault-c6-risc0-succinct-test" | awk '{ print $1 }')"
           binary_bytes="$(wc -c < "$bundle_dir/vault-c6-risc0-succinct-test" | tr -d '[:space:]')"
           {
