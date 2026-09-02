@@ -595,6 +595,80 @@ impl EncryptedWalletDb {
         })
     }
 
+    /// Exports a fresh no-clobber backup and proves it can be fully restored.
+    ///
+    /// The published backup is retained even if verification fails so an
+    /// uncertain result is never hidden by deletion. Callers must quarantine a
+    /// failed destination and keep all previously verified copies.
+    pub fn export_verified_backup(
+        &self,
+        backup_path: &Path,
+        root_key: &[u8; 32],
+    ) -> Result<WalletBackupSummary, WalletDbError> {
+        let exported = self.export_backup(backup_path, root_key)?;
+        let verified = Self::verify_backup(
+            backup_path,
+            root_key,
+            self.crypto.chain_id,
+            self.config.wallet_id,
+            exported.finalized_height,
+        )?;
+        if verified != exported {
+            return Err(WalletDbError::InvalidBackup);
+        }
+        Ok(exported)
+    }
+
+    /// Performs a complete restore drill without publishing a live database.
+    ///
+    /// Every chunk and all recovered database invariants pass through the same
+    /// path as [`Self::restore_backup`]. Temporary database and lock files are
+    /// removed before success is returned.
+    pub fn verify_backup(
+        backup_path: &Path,
+        root_key: &[u8; 32],
+        expected_chain_id: ChainId,
+        expected_wallet_id: [u8; 32],
+        minimum_finalized_height: u64,
+    ) -> Result<WalletBackupSummary, WalletDbError> {
+        let parent = protected_parent(backup_path)?;
+        let drill_directory = Builder::new()
+            .prefix(".vault-wallet-restore-drill-")
+            .tempdir_in(parent)
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        let restored_path = drill_directory.path().join("wallet.sqlite3");
+        let restored = Self::restore_backup(
+            backup_path,
+            &restored_path,
+            root_key,
+            expected_chain_id,
+            expected_wallet_id,
+            minimum_finalized_height,
+        )?;
+        let finalized_height = restored.load_tip()?.height();
+        let snapshot_bytes = fs::metadata(&restored_path)
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .len();
+        let backup_bytes = fs::metadata(backup_path)
+            .map_err(|_| WalletDbError::DatabaseFailure)?
+            .len();
+        drop(restored);
+        #[cfg(unix)]
+        {
+            fs::remove_file(&restored_path).map_err(|_| WalletDbError::DatabaseFailure)?;
+            fs::remove_file(super::lock_path(&restored_path)?)
+                .map_err(|_| WalletDbError::DatabaseFailure)?;
+        }
+        drill_directory
+            .close()
+            .map_err(|_| WalletDbError::DatabaseFailure)?;
+        Ok(WalletBackupSummary {
+            finalized_height,
+            snapshot_bytes,
+            backup_bytes,
+        })
+    }
+
     /// Restores one authenticated backup to a new, never-overwritten database.
     pub fn restore_backup(
         backup_path: &Path,

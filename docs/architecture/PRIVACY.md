@@ -231,7 +231,8 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   to the exact active predecessor and the bounded Unix history replays from a
   pinned bootstrap while requiring an exact external rollback anchor; concrete
   platform/hardware custody and rollback-guard storage, policy above the current
-  range, backup operations, migrations, secure key storage, long-history
+  range, backup retention/inventory/scheduling (verified export and temporary
+  restore drills are implemented), migrations, secure key storage, long-history
   pruning/growth, private retrieval, crash injection, benchmarks, and
   side-channel review remain open.
 - Spend authorization signatures and their `rk`/note ownership relation are

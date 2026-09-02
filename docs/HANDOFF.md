@@ -85,6 +85,11 @@ replayed from a pinned bootstrap. The store anchors generation plus policy ID
 through a platform boundary. Concrete keychain/secure-element rollback guards,
 bootstrap/compaction operations, concrete custodians, and the production
 full-node/light-client adapter remain open, so A1 is not complete.
+The backup path also has a verified no-clobber export operation that restores
+the new copy through the complete validation path in a protected temporary
+directory before reporting success. It preserves every prior copy. Durable
+multi-copy inventory, retention/deletion policy, scheduling/alerting, and
+platform fault injection remain open.
 
 The bounded C1-C6 cryptographic workstreams are complete at the boundaries in
 `docs/H1_CLOSURE_MATRIX.md`. The isolated RISC Zero core has a versioned

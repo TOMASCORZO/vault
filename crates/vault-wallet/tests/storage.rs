@@ -975,6 +975,7 @@ fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite()
     let directory = fs::canonicalize(temp.path()).unwrap();
     let source_path = database_path(&temp);
     let backup_path = directory.join("wallet.vwb");
+    let rotated_backup_path = directory.join("wallet-rotated.vwb");
     let restored_path = directory.join("restored.sqlite3");
     let owner = wallet(0xE1);
     let tip = initial_tip();
@@ -987,7 +988,9 @@ fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite()
     source.commit_finalized_block(first).unwrap();
 
     let source_external = source.witness_for_spend(external_nullifier).unwrap();
-    let summary = source.export_backup(&backup_path, &ROOT_KEY).unwrap();
+    let summary = source
+        .export_verified_backup(&backup_path, &ROOT_KEY)
+        .unwrap();
     assert_eq!(summary.finalized_height(), 1);
     assert_eq!(format!("{summary:?}"), "WalletBackupSummary(REDACTED)");
     assert!(summary.snapshot_bytes() > 0);
@@ -997,6 +1000,35 @@ fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite()
     );
     assert_eq!(summary.backup_bytes(), 1_049_104);
     assert_eq!(fs::metadata(&backup_path).unwrap().mode() & 0o777, 0o600);
+    assert!(fs::read_dir(&directory).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".vault-wallet-restore-drill-")
+    }));
+    assert_eq!(
+        EncryptedWalletDb::verify_backup(
+            &backup_path,
+            &[0x92; 32],
+            ChainId::new(NETWORK),
+            WALLET_ID,
+            1,
+        )
+        .unwrap_err(),
+        WalletDbError::AuthenticationFailed
+    );
+    assert_eq!(
+        EncryptedWalletDb::verify_backup(
+            &backup_path,
+            &ROOT_KEY,
+            ChainId::new(NETWORK),
+            WALLET_ID,
+            2,
+        )
+        .unwrap_err(),
+        WalletDbError::RollbackDetected
+    );
 
     let backup_bytes = fs::read(&backup_path).unwrap();
     assert_eq!(&backup_bytes[..4], b"VWB1");
@@ -1018,6 +1050,15 @@ fn authenticated_backup_restores_a_nonempty_spendable_wallet_without_overwrite()
             .windows(32)
             .any(|window| window == external_nullifier.to_bytes())
     );
+    let rotated_summary = source
+        .export_verified_backup(&rotated_backup_path, &ROOT_KEY)
+        .unwrap();
+    assert_eq!(
+        rotated_summary.finalized_height(),
+        summary.finalized_height()
+    );
+    assert_eq!(fs::read(&backup_path).unwrap(), backup_bytes);
+    assert_ne!(fs::read(&rotated_backup_path).unwrap(), backup_bytes);
     assert_eq!(
         source.export_backup(&backup_path, &ROOT_KEY).unwrap_err(),
         WalletDbError::AlreadyExists

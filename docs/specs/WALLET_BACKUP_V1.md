@@ -1,7 +1,9 @@
 # Vault encrypted wallet backup v1
 
-**Status:** production-intent implementation and adversarial tests complete; operational recovery gates remain  
-**Last updated:** 2026-08-23
+**Status:** production-intent container, verified export/rotation primitive, and
+restore-drill implementation complete; operational retention, inventory, and
+platform gates remain
+**Last updated:** 2026-09-02
 
 ## 1. Purpose and non-goals
 
@@ -162,9 +164,26 @@ An error after no-clobber publication but before directory sync has an uncertain
 durability outcome and MUST be reported. The exact destination may exist and
 must be revalidated instead of blindly retried or overwritten.
 
+### 6.1 Verified rotation and restore drills
+
+`verify_backup` exercises the exact production restore path into a fresh
+owner-protected temporary directory: it authenticates every chunk, publishes a
+temporary database with no-clobber semantics, opens and validates the complete
+wallet state, checks the rollback floor, then removes the temporary database,
+lock, and directory before returning success.
+
+`export_verified_backup` first publishes a fresh destination and then runs that
+full restore drill. Its exported and verified heights and byte sizes must match.
+It never overwrites or deletes an older backup. If verification fails after
+publication, the new destination remains for explicit quarantine because an
+uncertain result must not be silently erased. Operational rotation must retain
+previously verified independent copies until this method succeeds and inventory
+state is durably updated.
+
 ## 7. Implemented verification
 
-Automated tests cover a non-empty external/internal wallet round trip, current
+Automated tests cover verified no-clobber rotation that preserves the prior
+copy, cleanup of restore-drill state, a non-empty external/internal wallet round trip, current
 Merkle witnesses, a later spend and durable reopen, wrong export/restore root
 keys, wrong network scope, rollback floor, existing targets, owner-only modes,
 header privacy, malformed/truncated/appended containers, manifest corruption,
@@ -174,9 +193,10 @@ and associated-data separation.
 
 ## 8. Remaining recovery gates
 
-This format does not yet provide seed/key recovery, backup rotation policy,
-multi-copy inventory, cloud-provider privacy, deletion verification, damaged
-backup repair, cross-version migration, key rotation, secure rollback-floor
-updates, user confirmation UX, crash injection at every publication boundary,
-or scheduled restore drills. Those controls and internal security review remain
-mandatory before real funds.
+This format does not yet provide seed/key recovery, retention/deletion policy,
+durable multi-copy inventory, cloud-provider privacy, deletion verification,
+damaged backup repair, cross-version migration, key rotation, secure
+rollback-floor updates, user confirmation UX, crash injection at every
+publication boundary, or an external scheduler and alerting policy for periodic
+restore drills. Those controls and internal security review remain mandatory
+before real funds.

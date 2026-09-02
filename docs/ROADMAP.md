@@ -104,7 +104,9 @@ later milestones do not expand H1 cryptographic implementation.
   implemented, as are predecessor-authenticated policy updates and the bounded
   crash-consistent Unix policy history; concrete rollback-guard storage,
   bootstrap/compaction operations, and the real H2 validating adapter remain),
-  private/padded retrieval, product incomplete-recovery UX, backup rotation and restore drills,
+  private/padded retrieval, product incomplete-recovery UX (verified no-clobber
+  backup rotation and a full temporary restore-drill path are implemented;
+  retention/inventory policy and scheduling remain),
   versioned migrations, checkpoint pruning/compaction and long-history growth,
   keychain/secure-element key plus rollback state, multi-platform stores,
   crash/power-loss/disk-full fault injection, private block retrieval, and

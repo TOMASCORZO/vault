@@ -329,6 +329,9 @@ Still required before real funds:
 - a concrete validating full-node/light-client source plus private/padded
   compact-block transport; ordinary RPC agreement is not consensus finality;
 - reviewed product UX that never presents incomplete recovery as final;
+- durable backup inventory, retention/deletion policy, and scheduled restore
+  drill alerting (verified no-clobber export plus a complete temporary restore
+  drill are implemented);
 - benchmarked policy for more than 64 accounts and worst-case scan CPU/memory;
 - large-history, shard-boundary, pruning, and finalized-source adversarial tests;
 - crash, power-loss, disk-full, partial-write, and interrupted-recovery fault

@@ -195,8 +195,9 @@ This implementation is not release-ready. H1 still requires:
   and its exact external anchor boundary are implemented; concrete protected
   guard storage remains),
   a validating full-node/light-client recovery source, private retrieval,
-  product incomplete-recovery UX, policy above 64 accounts, backup rotation,
-  restore drills, multi-copy inventory,
+  product incomplete-recovery UX, policy above 64 accounts, backup
+  retention/scheduling and multi-copy inventory (verified no-clobber rotation
+  plus the complete temporary restore drill are implemented),
   and disaster-recovery documentation;
 - versioned migrations with upgrade/downgrade and interrupted-migration tests;
 - checkpoint-retention policy, bounded pruning measurements, database compaction,
