@@ -1,23 +1,21 @@
 # C6 proof-system benchmark — 2026-08-31
 
-**Status:** in progress; Halo2 selection measurements complete, one RISC Zero
-Succinct classification run remains.
+**Status:** complete at the C6 comparison-evidence boundary; no verifier is
+activated.
 
 ## Decision
 
-The specialized Halo2 transfer circuit remains Vault's base-layer candidate.
-The RISC Zero transfer-v2 implementation remains a reference backend and is
-rejected for direct base-layer activation in its measured Composite form: its
-311,977,650-byte receipt exceeds the 2,097,152-byte protocol limit, regardless
-of proving speed.
+The specialized Halo2 transfer circuit is selected as Vault's base-layer proof
+candidate. The RISC Zero transfer-v2 implementation remains a reference backend
+and RISC Zero 3.0.6 is rejected for direct base-layer activation.
 
-This is not C6 closure until the prepared Succinct classification run and the
-selection record are complete. Repeated RISC Zero proving, concurrency, and
-4/8/16-action measurements will not be purchased for a candidate already
-rejected by hard protocol and activation blockers. Stable Halo2 parameter/key
-serialization and cold loading remain A4 release engineering, not missing C6
-selection measurements. Missing RISC Zero measurements are reported as not
-purchased, not inferred from the successful two-action receipt.
+The 311,977,650-byte Composite receipt exceeds the 2,097,152-byte protocol
+limit. The follow-up RTX 5090 run compressed it to a verified 223,530-byte
+Succinct receipt, but wrapping does not remove the measured base-proving cost or
+resolved dependency/advisory blockers. Repeated RISC Zero proving,
+concurrency, and 4/8/16-action measurements were therefore not purchased.
+Stable Halo2 parameter/key serialization and cold loading remain A4 release
+engineering, not missing C6 selection measurements.
 
 ## Halo2 methodology
 
@@ -69,7 +67,7 @@ Reproduce with:
 ./scripts/benchmark-zk-c6-halo2-concurrency-macos.sh
 ```
 
-## RISC Zero evidence and missing cells
+## RISC Zero classification evidence
 
 The existing two-action H100/CUDA 12.8 run measured 1,329.338 seconds proving,
 47.15 seconds saved-receipt verification, and a 311,977,650-byte Composite
@@ -79,9 +77,15 @@ user cycles. See [`C1_RISC0_CUDA_2026-08-31.md`](C1_RISC0_CUDA_2026-08-31.md).
 That run did not capture peak host/GPU memory, repeated samples, concurrent
 provers, key/method preparation or load latency, or the 4/8/16-action buckets.
 Vault will not spend more rented GPU time merely to fill benchmark cells for a
-receipt format that already violates the hard consensus envelope. A future
-RISC Zero release or succinct wrapping path can reopen the comparison only
-after it fits the protocol bound.
+rejected candidate. On 2026-09-02 the prepared RTX 5090 `sm_120` forward-PTX
+run compressed the Composite receipt to a 223,530-byte verified Succinct
+receipt in 660.343 seconds. The complete positive/negative test passed in
+716.23 seconds. Peak GPU memory was 2,652 MiB and peak host RSS was 2,059,940
+KiB. Exact provenance, hashes, hardware, and artifacts are in
+[`C6_RISC0_SUCCINCT_CUDA_2026-09-02.md`](C6_RISC0_SUCCINCT_CUDA_2026-09-02.md).
+
+A future maintained RISC Zero release can reopen the comparison only after it
+clears the present activation blockers and is nominated as a candidate.
 
 ## Dependency and maintenance review
 
@@ -106,31 +110,23 @@ Resolved dependency details remain in
 and
 [`../audits/zk-risc0-dependency-audit-2026-08-21.md`](../audits/zk-risc0-dependency-audit-2026-08-21.md).
 
-## Exact remaining C6 work
+The final 2026-09-02 RustSec re-scan loaded 1,239 advisories. Halo2 scanned 127
+resolved packages with zero known vulnerabilities and the same inactive
+`atomic-polyfill` warning. The RISC Zero host lock scanned 565 packages and
+still failed on `rsa 0.9.10` and `tracing-subscriber 0.2.25`, six warnings, and
+the yanked `chacha20 0.10.1`; its guest lock scanned 213 packages and still
+failed on `tracing-subscriber 0.2.25` with three warnings. The final selection
+therefore remains fail-closed.
 
-The isolated CUDA procedure for the first RISC Zero decision gate is prepared
-in [`../runbooks/C6_RISC0_SUCCINCT_CUDA.md`](../runbooks/C6_RISC0_SUCCINCT_CUDA.md).
-It reuses the published Composite receipt rather than repeating base proving.
-No Succinct measurement exists until that procedure actually completes.
+## C6 closure
 
-The prerelease `c6-risc0-cuda-prebuild-v1` contains verified standalone
-archives for Ada `sm_89` and Hopper `sm_90`, built from
-`b4482a961f95ac74f6bf981a080ab047604bb516`. Native `sm_120` compilation
-exhausted the GitHub runner's RAM. CI subsequently verified the embedded
-`compute_90` PTX with `cuobjdump` and published the RTX 5090 forward-JIT package
-as prerelease `c6-risc0-cuda-prebuild-v2`, using runner commit
-`bfa534aae8387e9f1f97c06a9f6c4b744fc964e8`.
-
-1. Run the single prebuilt Composite-to-Succinct classification gate on
-   declared CUDA hardware and preserve its receipt, log, manifest, environment,
-   and resource samples.
-2. Re-run the dependency/advisory review at the selection commit and record the
-   final selection of Halo2 and rejection of RISC Zero 3.0.6 for direct
-   base-layer use.
+The Succinct classification run, artifact preservation, final dependency scan,
+and explicit selection record are complete. Halo2 is selected; RISC Zero 3.0.6
+is retained only as a non-activatable reference backend.
 
 Persistent Halo2 parameter/VK/PK artifacts and cold-load measurement remain
 A4. No repeated RISC Zero all-bucket run is required unless a future maintained
 version clears the present protocol and activation blockers and is nominated as
 a selection candidate.
 
-No verifier is activated by this report.
+No verifier is activated by this C6 closure.

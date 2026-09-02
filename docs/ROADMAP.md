@@ -127,7 +127,7 @@ later milestones do not expand H1 cryptographic implementation.
   multisignature, and delegated-proving profiles.
 - [ ] Activate a verifier only after all proof, wallet, vector, benchmark, and
   internal security gates pass.
-- [ ] Benchmark at least two maintained proof-system implementations.
+- [x] Benchmark at least two maintained proof-system implementations.
 - [x] Define proof parameter and trusted-setup assumptions for both backends;
   both use transparent parameter generation, while reproducible artifact and
   activation evidence remains gated by the H1 closure matrix.

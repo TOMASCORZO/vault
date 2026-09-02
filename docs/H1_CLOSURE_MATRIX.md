@@ -2,7 +2,7 @@
 
 **Status:** scope classification; no activation or production-readiness claim
 **Maturity:** production-intent
-**Last reconciled:** 2026-08-31
+**Last reconciled:** 2026-09-02
 
 This matrix freezes the remaining H1 work identified by `HANDOFF.md`. A newly
 discovered task does not expand H1 automatically. It must be assigned to one of
@@ -22,15 +22,14 @@ listed evidence. Passing these gates does not activate a verifier.
 | C3 | Define proof-system setup and parameter assumptions. | Versioned specification naming transparent versus structured setup, parameter provenance, integrity identifiers, generation/reproduction procedure, toxic-waste assumptions, rotation, and activation/deactivation rules. | Specified in `architecture/PROOF_SETUP.md`; implementation evidence remains under C2/C4/A4. |
 | C4 | Publish real-proof positive and negative vectors for both backends. | Versioned manifest with hashes, exact toolchains, public inputs, expected acceptance/rejection, proof-size bounds, and an offline verifier. Large proof artifacts may be release artifacts when repository size policy forbids committing them. | Complete: Halo2 vectors are committed under `zk/halo2/core/tests/vectors`; the RISC Zero receipt and three provenance files are published in release `c4-risc0-transfer-v2-v1`, with the canonical digest, exact toolchains, hashes, size, metrics, and an offline verifier that accepts the receipt and rejects public-input, proof-byte, and truncation mutations. The 311,977,650-byte reference receipt exceeds the 2,097,152-byte consensus limit, so C4 evidence is complete but this backend remains non-activatable. |
 | C5 | Decide epoch burn aggregation and low-volume privacy behavior without weakening conservation. | Normative design covering DKG trust, threshold shares, malicious/missing shares, validator rotation, minimum aggregate policy, low-volume carry/merge behavior, bounded recovery, supply-statistic update, and fail-closed activation. | Complete at the specification boundary: `specs/BURN_AGGREGATION_V1.md` freezes a greater-than-two-thirds threshold, deterministic accumulator, 256-ciphertext/64-block disclosure floor, indefinite low-volume carry under a same-key reshare lineage, verified share handling, bounded recovery/stall behavior, monotonic supply upper-bound update, and fail-closed activation. Network DKG, persistence, recovery implementation, and activation remain H2/A4/A5 work. |
-| C6 | Benchmark at least two maintained proof implementations on declared hardware. | Repeated measurements of key preparation or load, proving, verification, peak memory, proof size, concurrency, and all action buckets for the selected candidate; dependency and maintenance review; documented selection or rejection. A rejected candidate need not receive larger-bucket or concurrency runs after a hard protocol or activation blocker is evidenced at the minimum bucket. | In progress: Halo2 has three real measurements for every 2/4/8/16-action bucket plus a two-worker 16-action concurrency run on declared M1 hardware. RISC Zero 3.0.6 is rejected for direct base-layer selection because its Composite proof exceeds the hard size bound and its resolved host lock has activation-blocking advisories. One prebuilt CUDA Succinct run remains to classify its wrapping path without repeating base proving. Stable Halo2 key persistence/loading is A4 release engineering. See `evidence/C6_PROOF_BENCHMARK_2026-08-31.md`. |
+| C6 | Benchmark at least two maintained proof implementations on declared hardware. | Repeated measurements of key preparation or load, proving, verification, peak memory, proof size, concurrency, and all action buckets for the selected candidate; dependency and maintenance review; documented selection or rejection. A rejected candidate need not receive larger-bucket or concurrency runs after a hard protocol or activation blocker is evidenced at the minimum bucket. | Complete: Halo2 is selected after three real measurements for every 2/4/8/16-action bucket and a two-worker 16-action concurrency run on declared M1 hardware. RISC Zero 3.0.6 is rejected for base-layer activation after its H100 Composite measurement, the verified RTX 5090 Succinct classification, and the final dependency scan. The 223,530-byte Succinct receipt fits the envelope, but wrapping does not remove the base-proving cost or resolved advisory blockers. Stable Halo2 key persistence/loading remains A4 release engineering. See `evidence/C6_PROOF_BENCHMARK_2026-08-31.md` and `evidence/C6_RISC0_SUCCINCT_CUDA_2026-09-02.md`. |
 
 The Halo2 C2 closure freezes implementation shape and deterministic key
 identity; it did not by itself publish C4 release vectors, satisfy C6
 comparative benchmarking, or activate a verifier. The RISC
 Zero transfer-v2 statement and real-receipt evidence complete C1. The separately
-published positive/negative package completes C4. C6 now has repeated Halo2
-all-bucket and concurrency evidence, but comparative closure and verifier
-activation remain open.
+published positive/negative package completes C4. C6 is complete and selects
+Halo2; verifier activation remains open under A5.
 
 ## H1 activation hardening
 

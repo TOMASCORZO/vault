@@ -9,6 +9,12 @@ receipt to a Succinct receipt
 **Reviewed guest ID:**
 `85170f11445f10ba9b26e4ca96f29600fe4e30410081905f519a99449dd2d128`
 
+**Completed:** 2026-09-02 on RTX 5090; do not rent or rerun for C6. The preserved
+result is documented in
+[`../evidence/C6_RISC0_SUCCINCT_CUDA_2026-09-02.md`](../evidence/C6_RISC0_SUCCINCT_CUDA_2026-09-02.md)
+and release
+[`c6-risc0-succinct-v1`](https://github.com/TOMASCORZO/vault/releases/tag/c6-risc0-succinct-v1).
+
 This run does not repeat guest execution or the 1.16-billion-cycle base proof.
 It compresses the published 311,977,650-byte Composite receipt, verifies the
 Succinct result and negative mutations, and compares its encoded size with

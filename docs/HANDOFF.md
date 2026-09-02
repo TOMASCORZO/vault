@@ -1,6 +1,6 @@
 # Vault Project Handoff
 
-**Updated:** 2026-09-01
+**Updated:** 2026-09-02
 **Current milestone:** H1 — private-transfer production foundation  
 **Maturity:** production-intent, not activated, not safe for real funds
 
@@ -102,7 +102,8 @@ and suite ID
 `991523426f81b2350b1b08a7e2de9f60e334f344e40c23904c6dd8db5937c83a`.
 Real release proofs for every bucket passed on the Ryzen host, as did mutation
 of every two-action public-instance cell and the private classification/value
-negative matrix. C6 comparative benchmarks and verifier activation remain open.
+negative matrix. C6 comparative selection is complete; verifier activation
+remains open under A5.
 
 The Halo2 half of C4 is committed under
 `zk/halo2/core/tests/vectors`: four 9,664-byte real proofs, canonical public
@@ -150,21 +151,15 @@ heavy evidence needed for the current implementation step:
   and release-test gates.
 
 No additional test on this Ryzen machine blocks continued implementation on the
-M1. Work that is safe and useful on the M1 includes C6 tooling and documentation, ordinary Rust
-tests, and the applicable A1-A4 hardening tasks.
+M1. Work that is safe and useful on the M1 includes documentation, ordinary
+Rust tests, and the applicable A1-A4 hardening tasks.
 
-One cryptographic evidence item is still genuinely open:
-
-1. C6 needs the prepared RISC Zero Succinct classification run and final
-   selection record. RISC Zero 3.0.6 is already rejected for direct base-layer
-   selection by its Composite size and resolved advisory blockers, so repeated
-   2/4/8/16-action and concurrency rentals are not required. Stable Halo2
-   parameter/key serialization and cold-load measurement belong to A4 release
-   engineering.
-
-Do not mark C6 or A5 complete merely because implementation continues
-successfully on the M1. External audit is optional and is not a closure gate;
-the project-controlled reproducible suites are the acceptance authority.
+No cryptographic comparison rental remains. C6 is complete and selects Halo2
+as the base-layer proof candidate. Stable Halo2 parameter/key serialization and
+cold-load measurement belong to A4 release engineering. Do not mark A5 complete
+merely because implementation continues successfully on the M1. External audit
+is optional and is not a closure gate; the project-controlled reproducible
+suites are the acceptance authority.
 
 The branch now includes a host-only, opt-in `cuda-prover` feature and the
 fail-closed external-GPU procedure in
@@ -177,20 +172,23 @@ procedure completed on an NVIDIA H100. It produced the C1 receipt documented in
 implementation-evidence boundary. The release asset and offline negative-vector
 package complete C4; do not restart proving.
 
-C6 is now in progress with reproducible local evidence. Halo2 has three real
+C6 is complete with reproducible project evidence. Halo2 has three real
 release measurements for each 2/4/8/16-action bucket on the Apple M1, plus a
 two-worker 16-action concurrency measurement and process peak-RSS capture. The
 raw CSV and interpretation are in
-`docs/evidence/C6_PROOF_BENCHMARK_2026-08-31.md`. A separate fail-closed CUDA
-procedure in `docs/runbooks/C6_RISC0_SUCCINCT_CUDA.md` is prepared to compress
-the already published Composite receipt into a Succinct receipt without
-repeating base proving. It verifies the same reviewed guest and journal,
-reopens the output, rejects mutations, and records VRAM, host RSS, time, size,
-and the 2 MiB compatibility decision. This compression has not been run; do not
-report a Succinct size or C6 closure until external evidence exists.
+`docs/evidence/C6_PROOF_BENCHMARK_2026-08-31.md`.
 
-To minimize rental cost, the exact CUDA integration-test binaries are already
-published in prerelease `c6-risc0-cuda-prebuild-v1` for Ada `sm_89` and Hopper
+On 2026-09-02 an RTX 5090 `sm_120` run used verified `compute_90` PTX to
+compress the published Composite receipt to a real 223,530-byte Succinct
+receipt in 660.343 seconds. The complete 716.23-second test reopened and
+verified it, rejected public-input/proof/truncation mutations, and measured
+2,652 MiB peak GPU memory plus 2,059,940 KiB peak host RSS. Evidence is in
+`docs/evidence/C6_RISC0_SUCCINCT_CUDA_2026-09-02.md` and release
+`c6-risc0-succinct-v1`. Instance `49678408` was destroyed after the five files
+were copied and verified.
+
+The exact CUDA integration-test binaries remain published in prerelease
+`c6-risc0-cuda-prebuild-v1` for Ada `sm_89` and Hopper
 `sm_90`, from source commit
 `b4482a961f95ac74f6bf981a080ab047604bb516`. Their CI builds and archive hashes
 passed. Native Blackwell `sm_120` compilation exceeded the GitHub runner's RAM,
@@ -199,9 +197,9 @@ the fail-closed RTX 5090 forward-JIT package as prerelease
 `c6-risc0-cuda-prebuild-v2`, with runner commit
 `bfa534aae8387e9f1f97c06a9f6c4b744fc964e8`. The rented host must not clone the
 repository, install Rust or compile: it downloads the matching prebuilt bundle
-and published Composite receipt, forces PTX JIT on `sm_120`, runs the preflight
-and compression, copies five evidence files, and is then destroyed. The
-optimized commands and 30 GiB disk profile are frozen in the C6 runbook.
+and published Composite receipt. The completed run required no repository
+clone, installation, or compilation on the billed GPU. Do not repeat this
+rental for C6.
 
 ## H1 scope correction
 
@@ -253,8 +251,9 @@ cryptographic scope.
 > `docs/H1_CLOSURE_MATRIX.md`. Preserve C1, C2, C4, and C5 as complete at their
 > stated boundaries. The real RISC Zero
 > receipt is published in release `c4-risc0-transfer-v2-v1`; do not restart
-> proving. Continue the next locally actionable bounded item, normally C6,
-> while keeping C1-C6 separate from A1-A5 and H2. Do not create prototypes,
+> proving. Preserve C1-C6 as complete at their stated boundaries and continue
+> the next bounded A1-A4 item while keeping activation and H2 separate. Do not
+> create prototypes,
 > expand H1 with
 > H2/mainnet work, start contracts, use real funds, or claim production
 > readiness.
