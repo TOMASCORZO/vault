@@ -1,8 +1,8 @@
 # Vault Privacy Architecture
 
-**Maturity:** production-intent foundation; not mainnet-eligible.  
-**Priority:** private transfers before private contracts.  
-**Last updated:** 2026-08-22.
+**Maturity:** production-intent foundation; not mainnet-eligible.
+**Priority:** private transfers before private contracts.
+**Last updated:** 2026-09-02.
 
 ## 1. Meaning of the privacy target
 
@@ -90,6 +90,12 @@ Seed inputs shorter than 32 bytes, larger than 4096 bytes, and the zero network
 ID are rejected. The network ID prevents accidental reuse of the same Orchard
 receiver across Vault networks or another protocol when wallets follow this
 derivation. A deterministic key/address vector is enforced in unit tests.
+
+The production-intent wallet entry point narrows this low-level primitive to a
+typed, non-clonable, zeroizing 32-byte seed. Interactive/file recovery imports
+use the exact checksum-protected `VSEED001` package specified in
+[`WALLET_RECOVERY_V1.md`](../specs/WALLET_RECOVERY_V1.md); concrete platform and
+hardware custody remain activation gates.
 
 The final user-facing address codec is not frozen. Raw 43-byte addresses MUST
 NOT be presented to users until a checksummed, network-specific encoding is
@@ -219,8 +225,9 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   trailing-account gap. Its bounded coordinator now authenticates hostile
   compact bytes against externally verified finalized headers and resumes from
   durable state, but does not yet supply the consensus-verifying or private
-  network adapter. Seed custody, trusted checkpoint distribution, policy above
-  the current range, backup operations, migrations, secure key and
+  network adapter. The typed/checksummed seed-import boundary is implemented;
+  concrete platform/hardware custody, trusted checkpoint distribution, policy
+  above the current range, backup operations, migrations, secure key and
   rollback-counter storage, long-history
   pruning/growth, private retrieval, crash injection, benchmarks, and
   side-channel review remain open.

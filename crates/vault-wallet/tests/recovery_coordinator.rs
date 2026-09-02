@@ -16,9 +16,10 @@ use vault_wallet::{
     EncryptedWalletDb, FinalizedRecoverySource, FinalizedWalletStore,
     MAX_RECOVERY_BLOCKS_PER_ADVANCE, WalletBirthdayCheckpoint, WalletDatabaseConfig,
     WalletRecoveryAccounts, WalletRecoveryCoordinatorFailure, WalletRecoveryPlan,
-    WalletRecoveryStatus, WalletScanError, WalletScanTip, advance_seed_recovery,
-    scan_finalized_block,
+    WalletRecoveryStatus, WalletScanError, WalletScanTip, WalletSeedMaterial,
+    advance_seed_recovery, scan_finalized_block,
 };
+use zeroize::Zeroizing;
 
 const NETWORK: [u8; 32] = [0x91; 32];
 const GENESIS_HASH: [u8; 32] = [0x92; 32];
@@ -34,6 +35,10 @@ fn wallet(seed: u8) -> VaultFullViewingKey {
     VaultSpendingKey::derive(&[seed; 32], NETWORK, 0)
         .unwrap()
         .full_viewing_key()
+}
+
+fn recovery_seed(byte: u8) -> WalletSeedMaterial {
+    WalletSeedMaterial::from_custodian_entropy(Zeroizing::new([byte; 32])).unwrap()
 }
 
 fn action(
@@ -127,7 +132,8 @@ fn fixture() -> RecoveryFixture {
     let path = fs::canonicalize(temp.path())
         .unwrap()
         .join("coordinator.sqlite3");
-    let accounts = WalletRecoveryAccounts::derive(&[0xA1; 32], ChainId::new(NETWORK), 3).unwrap();
+    let accounts =
+        WalletRecoveryAccounts::derive(&recovery_seed(0xA1), ChainId::new(NETWORK), 3).unwrap();
     let owner = accounts.full_viewing_key(0).unwrap();
     let unrelated = wallet(0xA2);
     let mut rng = ChaCha20Rng::from_seed([0xA3; 32]);
@@ -354,7 +360,7 @@ fn coordinator_rejects_limits_wrong_accounts_headers_and_compact_bytes_before_mu
     assert!(empty.header_requests.is_empty());
 
     let wrong_accounts =
-        WalletRecoveryAccounts::derive(&[0xB1; 32], ChainId::new(NETWORK), 3).unwrap();
+        WalletRecoveryAccounts::derive(&recovery_seed(0xB1), ChainId::new(NETWORK), 3).unwrap();
     let error =
         advance_seed_recovery(&mut fixture.database, &mut empty, &wrong_accounts, 1).unwrap_err();
     assert!(matches!(

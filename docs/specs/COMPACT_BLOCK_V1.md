@@ -1,7 +1,9 @@
 # Vault compact block and finalized wallet scan v1
 
-**Status:** production-intent canonical codec, header binding, local scanner, and first encrypted ShardTree database implemented; recovery/network/review gates open  
-**Last updated:** 2026-08-23
+**Status:** production-intent canonical codec, header binding, local scanner,
+typed seed-import boundary, and first encrypted ShardTree database implemented;
+recovery/network/review gates open
+**Last updated:** 2026-09-02
 
 ## 1. Scope and privacy rule
 
@@ -158,8 +160,9 @@ account-activity gap, and incomplete/complete/range-exhausted phase are encrypte
 and atomic with the tip. The bounded synchronization coordinator specified in
 [`WALLET_RECOVERY_SYNC_V1.md`](WALLET_RECOVERY_SYNC_V1.md) now retrieves exactly
 the next durable height, requires an externally consensus-verified header,
-authenticates hostile compact bytes, and commits before advancing. Approved seed
-custody, a concrete validating node/light-client adapter, trusted checkpoint
+authenticates hostile compact bytes, and commits before advancing. The
+typed/checksummed seed-import boundary is implemented; concrete platform/hardware
+custody, a validating node/light-client adapter, trusted checkpoint
 distribution, backup operations/drills, migrations,
 hardware/keychain root-key and rollback state, exhaustive crash/power-loss
 injection, long-history pruning and growth measurements,

@@ -1,10 +1,10 @@
 # Vault wallet seed and birthday recovery v1
 
-**Status:** production-intent deterministic account discovery, finalized target,
-durable progress, and birthday-frontier initialization implemented; custody,
-checkpoint distribution, operational UX, fault injection, and internal security review
-remain activation gates  
-**Last updated:** 2026-08-23
+**Status:** production-intent typed seed-import boundary, deterministic account
+discovery, finalized target, durable progress, and birthday-frontier initialization
+implemented; platform custody, checkpoint distribution, operational UX, fault
+injection, and internal security review remain activation gates
+**Last updated:** 2026-09-02
 
 ## 1. Purpose and safety boundary
 
@@ -19,12 +19,45 @@ omit funds. Vault cannot infer first address exposure from the seed. Production
 UX MUST choose a conservative birthday, warn on overrides, and offer genesis
 recovery when provenance is uncertain.
 
-The implementation accepts seed bytes transiently but never stores them. Each
+The implementation accepts seed material transiently but never stores it. Each
 derived spending key is converted immediately to a full viewing key and dropped;
 the recovery account container retains only viewing capabilities, which cannot
-authorize spends and are zeroized by their underlying types on drop. Approved
-seed entry, hardware custody, memory-locking, and crash-dump controls remain
+authorize spends and are zeroized by their underlying types on drop. The typed
+seed boundary, package checksum, and scoped custodian callback are implemented;
+hardware/platform custody, memory locking, and crash-dump controls remain
 separate gates.
+
+### 1.1 Seed import and custody boundary
+
+`WalletSeedMaterial` owns exactly 32 bytes of nonzero entropy in a non-clonable,
+redacted, zeroizing value. Generation consumes a cryptographic RNG once and
+fails closed on all-zero output. An already authenticated platform custodian may
+provide exact entropy through `from_custodian_entropy`; interactive or file
+entry instead uses `import_recovery_package`.
+
+The version-1 recovery package is exactly 72 bytes:
+
+```text
+"VSEED001" || entropy_32 || BLAKE3-DERIVE(
+  "vault.wallet.seed-recovery-package-v1.2026-09-02",
+  "VSEED001" || entropy_32
+)
+```
+
+The checksum detects accidental truncation, trailing data, version confusion,
+and mutation before derivation. It is neither encryption nor authentication
+against an attacker who can replace the whole package. Exported packages contain
+the seed in plaintext and belong only on an approved offline custody medium.
+
+The deterministic codec vector uses entropy byte `a1` repeated 32 times and
+produces checksum
+`39f4d9f6a3ae31098d09c8d7054311ce60f6efba2ca52280e4c7ae96978118ad`.
+The test pins the complete 72-byte package and rejects mutation of every byte.
+
+`WalletSeedCustodian::use_seed` lends a reference for one scoped operation.
+`WalletRecoveryAccounts::derive_from_custodian` validates public resource limits
+before requesting access and retains only viewing capabilities. Concrete OS
+keystore and hardware implementations are later platform gates.
 
 ## 2. Trusted finalized boundaries
 
@@ -53,11 +86,11 @@ tracking.
 
 ## 3. Deterministic account discovery
 
-`WalletRecoveryAccounts::derive(seed, chain_id, account_count)` derives the
-contiguous account range `0..account_count` using the network-separated
-`VaultSpendingKey` derivation. Within an account, one full viewing key covers all
-diversified external recipient addresses and the internal change scope, so
-address indices do not use a separate gap rule.
+`WalletRecoveryAccounts::derive(seed_material, chain_id, account_count)` derives
+the contiguous account range `0..account_count` through the typed seed boundary
+and network-separated `VaultSpendingKey` derivation. Within an account, one full
+viewing key covers all diversified external recipient addresses and the internal
+change scope, so address indices do not use a separate gap rule.
 
 For every account the wallet derives a stable private `WalletAccountId` from:
 
@@ -164,7 +197,9 @@ restored, and resumed without being relabeled complete.
 
 ## 7. Required operational procedure
 
-1. Obtain seed material through an approved custody ceremony.
+1. Import a checksum-valid recovery package or obtain typed seed material from
+   an approved custodian. Never treat the recovery-package checksum as encryption
+   or authenticity.
 2. Independently authenticate a conservative birthday header and frontier.
 3. Independently authenticate a recent finalized target header.
 4. Choose a documented account count and trailing gap within the 64-account
@@ -190,8 +225,8 @@ reveals account history if the endpoint holding it is compromised.
 
 Still required before real funds:
 
-- approved seed import/custody, hardware-backed derivation, memory locking, and
-  crash-dump policy;
+- concrete approved platform/hardware custody, hardware-backed derivation,
+  memory locking, crash-dump policy, and an offline recovery-package ceremony;
 - trusted birthday/target distribution with multi-source verification and a
   conservative user-facing override ceremony;
 - a concrete validating full-node/light-client source plus private/padded

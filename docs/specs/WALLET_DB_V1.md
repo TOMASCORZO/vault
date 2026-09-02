@@ -1,10 +1,10 @@
 # Vault encrypted finalized-wallet database v1
 
 **Status:** production-intent Unix database, authenticated backup/restore,
-finalized birthday frontier, and durable seed-recovery state; seed custody, migration,
-platform-keystore, fault-injection, side-channel, and internal-review gates
-remain open  
-**Last updated:** 2026-08-23
+typed seed-import boundary, finalized birthday frontier, and durable recovery
+state; platform custody, migration, fault-injection, side-channel, and
+internal-review gates remain open
+**Last updated:** 2026-09-02
 
 ## 1. Security boundary
 
@@ -188,7 +188,8 @@ The returned type redacts all fields from `Debug`.
 This implementation is not release-ready. H1 still requires:
 
 - hardware/keychain root-key handling and a monotonic rollback counter;
-- approved seed custody/import, trusted birthday/target distribution,
+- concrete platform/hardware seed custody and its operational ceremony (the
+  typed/checksummed import boundary is implemented), trusted birthday/target distribution,
   a validating full-node/light-client recovery source, private retrieval,
   product incomplete-recovery UX, policy above 64 accounts, backup rotation,
   restore drills, multi-copy inventory,

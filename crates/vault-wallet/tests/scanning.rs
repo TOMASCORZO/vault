@@ -12,8 +12,9 @@ use vault_protocol::{
 use vault_wallet::{
     FinalizedWalletStore, MAX_SCAN_ACCOUNTS, ScanCommitError, ScannedBlockUpdate, WalletAccountId,
     WalletRecoveryAccounts, WalletRecoveryError, WalletScanAccount, WalletScanError, WalletScanTip,
-    scan_and_commit, scan_finalized_block,
+    WalletSeedMaterial, scan_and_commit, scan_finalized_block,
 };
+use zeroize::Zeroizing;
 
 const NETWORK: [u8; 32] = [0x31; 32];
 const GENESIS_HASH: [u8; 32] = [0x60; 32];
@@ -31,6 +32,10 @@ fn wallet(seed: u8) -> VaultFullViewingKey {
     VaultSpendingKey::derive(&[seed; 32], NETWORK, 0)
         .unwrap()
         .full_viewing_key()
+}
+
+fn recovery_seed(byte: u8) -> WalletSeedMaterial {
+    WalletSeedMaterial::from_custodian_entropy(Zeroizing::new([byte; 32])).unwrap()
 }
 
 fn action_with_nullifier(
@@ -421,8 +426,9 @@ fn scan_accounts_are_bounded_unique_and_include_both_scopes() {
 
 #[test]
 fn deterministic_seed_accounts_cross_primitive_batches_without_retaining_spending_keys() {
-    let accounts = WalletRecoveryAccounts::derive(&[0xC7; 32], ChainId::new(NETWORK), 20).unwrap();
-    let repeated = WalletRecoveryAccounts::derive(&[0xC7; 32], ChainId::new(NETWORK), 20).unwrap();
+    let seed = recovery_seed(0xC7);
+    let accounts = WalletRecoveryAccounts::derive(&seed, ChainId::new(NETWORK), 20).unwrap();
+    let repeated = WalletRecoveryAccounts::derive(&seed, ChainId::new(NETWORK), 20).unwrap();
     assert_eq!(format!("{accounts:?}"), "WalletRecoveryAccounts(REDACTED)");
     assert_eq!(accounts.account_count(), 20);
     for index in 0..20 {
@@ -433,18 +439,14 @@ fn deterministic_seed_accounts_cross_primitive_batches_without_retaining_spendin
         );
     }
     let other_network =
-        WalletRecoveryAccounts::derive(&[0xC7; 32], ChainId::new([0x32; 32]), 20).unwrap();
+        WalletRecoveryAccounts::derive(&seed, ChainId::new([0x32; 32]), 20).unwrap();
     assert_ne!(accounts.account_id(17), other_network.account_id(17));
     assert_eq!(
-        WalletRecoveryAccounts::derive(&[0xC7; 31], ChainId::new(NETWORK), 1).unwrap_err(),
-        WalletRecoveryError::AccountDerivationFailed
-    );
-    assert_eq!(
-        WalletRecoveryAccounts::derive(&[0xC7; 32], ChainId::new(NETWORK), 0).unwrap_err(),
+        WalletRecoveryAccounts::derive(&seed, ChainId::new(NETWORK), 0).unwrap_err(),
         WalletRecoveryError::InvalidAccountCount
     );
     assert_eq!(
-        WalletRecoveryAccounts::derive(&[0xC7; 32], ChainId::new(NETWORK), MAX_SCAN_ACCOUNTS + 1,)
+        WalletRecoveryAccounts::derive(&seed, ChainId::new(NETWORK), MAX_SCAN_ACCOUNTS + 1,)
             .unwrap_err(),
         WalletRecoveryError::InvalidAccountCount
     );

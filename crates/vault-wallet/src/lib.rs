@@ -5,14 +5,19 @@
 //! crate deliberately has no network fetcher, unauthenticated scan entry point,
 //! volatile production store, or spendable unfinalized-note path. Its first
 //! encrypted transactional ShardTree store is production-intent, not release
-//! ready: approved seed custody, trusted birthday/target distribution, recovery
-//! policy beyond the bounded account range, migrations, platform key storage,
-//! crash injection, access-pattern benchmarks, and independent review remain H1
-//! activation gates.
+//! ready: concrete platform/hardware seed custody, trusted birthday/target
+//! distribution, recovery policy beyond the bounded account range, migrations,
+//! platform key storage, crash injection, access-pattern benchmarks, and
+//! independent review remain H1 activation gates.
 
+mod custody;
 mod recovery;
 mod storage;
 
+pub use custody::{
+    WALLET_SEED_ENTROPY_BYTES, WALLET_SEED_RECOVERY_PACKAGE_BYTES, WalletSeedCustodian,
+    WalletSeedCustodyError, WalletSeedImportError, WalletSeedMaterial,
+};
 pub use recovery::{
     FinalizedRecoverySource, MAX_RECOVERY_BLOCKS_PER_ADVANCE, WalletRecoveryAdvance,
     WalletRecoveryCoordinatorError, WalletRecoveryCoordinatorFailure, advance_seed_recovery,
@@ -249,7 +254,7 @@ impl fmt::Debug for WalletRecoveryAccounts {
 impl WalletRecoveryAccounts {
     /// Derives a contiguous, globally bounded account range from seed material.
     pub fn derive(
-        seed: &[u8],
+        seed: &WalletSeedMaterial,
         chain_id: ChainId,
         account_count: usize,
     ) -> Result<Self, WalletRecoveryError> {
@@ -260,8 +265,12 @@ impl WalletRecoveryAccounts {
         for raw_index in 0..account_count {
             let account_index =
                 u32::try_from(raw_index).map_err(|_| WalletRecoveryError::InvalidAccountCount)?;
-            let spending_key = VaultSpendingKey::derive(seed, *chain_id.as_bytes(), account_index)
-                .map_err(|_: PrivacyError| WalletRecoveryError::AccountDerivationFailed)?;
+            let spending_key = VaultSpendingKey::derive(
+                seed.expose_for_derivation(),
+                *chain_id.as_bytes(),
+                account_index,
+            )
+            .map_err(|_: PrivacyError| WalletRecoveryError::AccountDerivationFailed)?;
             let full_viewing_key = spending_key.full_viewing_key();
             drop(spending_key);
             let account_id = recovery_account_id(chain_id, account_index, &full_viewing_key)?;
@@ -277,6 +286,24 @@ impl WalletRecoveryAccounts {
             accounts,
             commitment,
         })
+    }
+
+    /// Requests a single scoped seed use from an external custodian and retains
+    /// only the derived viewing capabilities.
+    pub fn derive_from_custodian<Custodian: WalletSeedCustodian>(
+        custodian: &mut Custodian,
+        chain_id: ChainId,
+        account_count: usize,
+    ) -> Result<Self, WalletSeedCustodyError<Custodian::Error>> {
+        if account_count == 0 || account_count > MAX_SCAN_ACCOUNTS {
+            return Err(WalletSeedCustodyError::Recovery(
+                WalletRecoveryError::InvalidAccountCount,
+            ));
+        }
+        custodian
+            .use_seed(|seed| Self::derive(seed, chain_id, account_count))
+            .map_err(WalletSeedCustodyError::Custodian)?
+            .map_err(WalletSeedCustodyError::Recovery)
     }
 
     /// Network domain used for all derived accounts.

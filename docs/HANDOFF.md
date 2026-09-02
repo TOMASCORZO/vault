@@ -65,6 +65,7 @@ The repository contains substantial production-intent H1 work, including:
   proof component;
 - canonical compact blocks, finalized-header authentication, local trial
   decryption, note-tree replay, encrypted transactional wallet storage, backups,
+  a typed/checksummed seed-import and scoped-custodian boundary,
   birthday-frontier recovery, deterministic seed account discovery, and bounded
   restart-safe recovery coordination;
 - output authorization, Noise XX pairing and KK signer transport, an encrypted

@@ -20,11 +20,12 @@ use vault_wallet::{
     EncryptedWalletDb, FinalizedWalletStore, WalletAccountId, WalletDatabaseConfig, WalletDbError,
     WalletScanAccount, WalletScanTip, scan_finalized_block,
 };
+use zeroize::Zeroizing;
 
 #[cfg(unix)]
 use vault_wallet::{
     WalletBirthdayCheckpoint, WalletRecoveryAccounts, WalletRecoveryError, WalletRecoveryPlan,
-    WalletRecoveryStatus, WalletScanError,
+    WalletRecoveryStatus, WalletScanError, WalletSeedMaterial,
 };
 
 const NETWORK: [u8; 32] = [0x41; 32];
@@ -44,6 +45,11 @@ fn wallet(seed: u8) -> VaultFullViewingKey {
     VaultSpendingKey::derive(&[seed; 32], NETWORK, 0)
         .unwrap()
         .full_viewing_key()
+}
+
+#[cfg(unix)]
+fn recovery_seed(byte: u8) -> WalletSeedMaterial {
+    WalletSeedMaterial::from_custodian_entropy(Zeroizing::new([byte; 32])).unwrap()
 }
 
 fn action(
@@ -397,7 +403,7 @@ fn verified_birthday_frontier_recovers_future_notes_and_persists_its_origin() {
     let directory = fs::canonicalize(temp.path()).unwrap();
     let path = database_path(&temp);
     let recovery_accounts =
-        WalletRecoveryAccounts::derive(&[0xD2; 32], ChainId::new(NETWORK), 3).unwrap();
+        WalletRecoveryAccounts::derive(&recovery_seed(0xD2), ChainId::new(NETWORK), 3).unwrap();
     let owner = recovery_accounts.full_viewing_key(0).unwrap();
     let unrelated = wallet(0xD3);
     let genesis_tip = initial_tip();
@@ -534,7 +540,7 @@ fn verified_birthday_frontier_recovers_future_notes_and_persists_its_origin() {
         WalletRecoveryError::InvalidTarget
     );
     let wrong_network_accounts =
-        WalletRecoveryAccounts::derive(&[0xD2; 32], ChainId::new([0x42; 32]), 3).unwrap();
+        WalletRecoveryAccounts::derive(&recovery_seed(0xD2), ChainId::new([0x42; 32]), 3).unwrap();
     assert_eq!(
         WalletRecoveryPlan::new(
             checkpoint.clone(),
@@ -579,7 +585,7 @@ fn verified_birthday_frontier_recovers_future_notes_and_persists_its_origin() {
         .unwrap();
 
     let wrong_accounts =
-        WalletRecoveryAccounts::derive(&[0xDE; 32], ChainId::new(NETWORK), 3).unwrap();
+        WalletRecoveryAccounts::derive(&recovery_seed(0xDE), ChainId::new(NETWORK), 3).unwrap();
     let wrong_update = scan_finalized_block(
         &history_tip,
         &payment_block,
@@ -813,7 +819,8 @@ fn verified_birthday_frontier_recovers_future_notes_and_persists_its_origin() {
 fn recovery_target_and_trailing_account_gap_fail_closed() {
     let temp = tempfile::tempdir().unwrap();
     let path = database_path(&temp);
-    let accounts = WalletRecoveryAccounts::derive(&[0xE1; 32], ChainId::new(NETWORK), 2).unwrap();
+    let accounts =
+        WalletRecoveryAccounts::derive(&recovery_seed(0xE1), ChainId::new(NETWORK), 2).unwrap();
     let owner = accounts.full_viewing_key(1).unwrap();
     let unrelated = wallet(0xE2);
     let genesis_tip = initial_tip();

@@ -96,7 +96,9 @@ later milestones do not expand H1 cryptographic implementation.
 - [x] Implement bounded finalized-recovery coordination with an explicit
   consensus-verified header source boundary, hostile compact-byte decoding,
   one-height durable commits, partial-success accounting, and exact reopen/resume.
-- [ ] Complete approved seed custody/import, trusted birthday and target
+- [ ] Complete concrete platform/hardware seed custody and its operational
+  ceremony (the typed 32-byte seed boundary, checksummed offline package, and
+  scoped custodian callback are implemented), trusted birthday and target
   checkpoint distribution (the real validating full-node/light-client adapter
   is H2 and consumes the fail-closed H1 boundary),
   private/padded retrieval, product incomplete-recovery UX, backup rotation and restore drills,
