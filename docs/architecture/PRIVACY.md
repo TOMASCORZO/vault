@@ -227,10 +227,11 @@ an isolated BTC deposit can otherwise be correlated with a Vault receipt.
   durable state, but does not yet supply the consensus-verifying or private
   network adapter. The typed/checksummed seed-import boundary is implemented;
   distinct threshold-authenticated birthday and target distribution now require
-  independently finalized matching headers; concrete platform/hardware custody,
-  publisher-policy delivery and rollback protection, policy above the current
-  range, backup operations, migrations, secure key and
-  rollback-counter storage, long-history
+  independently finalized matching headers. Successor-policy delivery is bound
+  to the exact active predecessor and the bounded Unix history replays from a
+  pinned bootstrap while requiring an exact external rollback anchor; concrete
+  platform/hardware custody and rollback-guard storage, policy above the current
+  range, backup operations, migrations, secure key storage, long-history
   pruning/growth, private retrieval, crash injection, benchmarks, and
   side-channel review remain open.
 - Spend authorization signatures and their `rk`/note ownership relation are

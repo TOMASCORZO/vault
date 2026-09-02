@@ -6,20 +6,27 @@
 //! volatile production store, or spendable unfinalized-note path. Its first
 //! encrypted transactional ShardTree store is production-intent, not release
 //! ready: concrete platform/hardware seed custody, trusted birthday/target
-//! distribution, recovery policy beyond the bounded account range, migrations,
-//! platform key storage, crash injection, access-pattern benchmarks, and
-//! independent review remain H1 activation gates.
+//! bootstrap and rollback-guard operations, recovery policy beyond the bounded
+//! account range, migrations, platform key storage, crash injection,
+//! access-pattern benchmarks, and independent review remain H1 activation
+//! gates.
 
 mod checkpoint_distribution;
+mod checkpoint_policy_store;
 mod custody;
 mod recovery;
 mod storage;
 
 pub use checkpoint_distribution::{
     AuthenticatedRecoveryTarget, CheckpointDistributionDraft, CheckpointDistributionError,
-    CheckpointPublisherSignature, CheckpointTrustPolicy, MAX_CHECKPOINT_PUBLISHERS,
-    RecoveryTargetDistributionDraft, checkpoint_publisher_id,
-    verify_birthday_checkpoint_distribution, verify_recovery_target_distribution,
+    CheckpointPolicyUpdateDraft, CheckpointPublisherSignature, CheckpointTrustPolicy,
+    MAX_CHECKPOINT_POLICY_UPDATE_BYTES, MAX_CHECKPOINT_PUBLISHERS, RecoveryTargetDistributionDraft,
+    checkpoint_publisher_id, verify_birthday_checkpoint_distribution,
+    verify_checkpoint_policy_update, verify_recovery_target_distribution,
+};
+pub use checkpoint_policy_store::{
+    CheckpointPolicyAnchor, CheckpointPolicyRollbackGuard, CheckpointPolicyRollbackGuardError,
+    CheckpointPolicyStore, CheckpointPolicyStoreError,
 };
 pub use custody::{
     WALLET_SEED_ENTROPY_BYTES, WALLET_SEED_RECOVERY_PACKAGE_BYTES, WalletSeedCustodian,

@@ -24,10 +24,10 @@ The authoritative continuation branch is `codex/c1-transfer-v2` on
 `https://github.com/TOMASCORZO/vault`. Its latest published commits are:
 
 ```text
-ef71be9 Publish RISC Zero C4 vector verifier
-f8031ed Use project test evidence as release authority
-5860f46 Record successful C1 CUDA receipt evidence
-d300b17 Pin canonical CUDA guest image ID
+87777ac Authenticate wallet recovery targets
+386de47 Authenticate wallet birthday checkpoint distribution
+208ce5a Add typed wallet seed custody boundary
+fd46784 Persist canonical Halo2 parameters for A4
 ```
 
 On another machine or account, fetch and switch to that branch before making
@@ -76,12 +76,15 @@ The repository contains substantial production-intent H1 work, including:
 The latest completed A1 sub-blocks are the typed seed boundary in
 `crates/vault-wallet/src/custody.rs` and distinct threshold-authenticated
 birthday/target distribution in
-`crates/vault-wallet/src/checkpoint_distribution.rs`. A package is accepted only
-when it also matches an independently consensus-verified header; publisher
-quorum is not finality. Successor policies remove revoked keys under a monotonic
-generation, but authenticated policy delivery and rollback-resistant generation
-storage, concrete custodians, and the production full-node/light-client adapter
-remain open, so A1 is not complete.
+`crates/vault-wallet/src/checkpoint_distribution.rs`, plus the bounded Unix
+policy history in `crates/vault-wallet/src/checkpoint_policy_store.rs`. A
+checkpoint package is accepted only when it also matches an independently
+consensus-verified header; publisher quorum is not finality. Successor policies
+are authenticated by their exact predecessor, remove revoked keys, and are
+replayed from a pinned bootstrap. The store anchors generation plus policy ID
+through a platform boundary. Concrete keychain/secure-element rollback guards,
+bootstrap/compaction operations, concrete custodians, and the production
+full-node/light-client adapter remain open, so A1 is not complete.
 
 The bounded C1-C6 cryptographic workstreams are complete at the boundaries in
 `docs/H1_CLOSURE_MATRIX.md`. The isolated RISC Zero core has a versioned

@@ -163,8 +163,10 @@ the next durable height, requires an externally consensus-verified header,
 authenticates hostile compact bytes, and commits before advancing. The
 typed/checksummed seed-import boundary is implemented; concrete platform/hardware
 custody, a validating node/light-client adapter, publisher-policy delivery and
-rollback protection (authenticated birthday/target packages and successor key
-removal are implemented), backup operations/drills, migrations,
+rollback protection (authenticated birthday/target and successor-policy
+packages, successor key removal, and a bounded Unix policy history are
+implemented; the concrete protected rollback guard remains), backup
+operations/drills, migrations,
 hardware/keychain root-key and rollback state, exhaustive crash/power-loss
 injection, long-history pruning and growth measurements,
 file-size/access-pattern mitigation, private block retrieval, side-channel

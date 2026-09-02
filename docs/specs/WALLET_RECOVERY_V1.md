@@ -3,8 +3,10 @@
 **Status:** production-intent typed seed-import boundary, deterministic account
 discovery, finalized target, durable progress, and birthday-frontier initialization
 implemented; authenticated birthday and target distribution are implemented;
-platform custody, publisher operations, operational UX, fault injection, and
-internal security review remain activation gates
+authenticated policy updates and the crash-consistent Unix policy log are
+implemented; platform custody/rollback guards, publisher operations,
+operational UX, fault injection, and internal security review remain activation
+gates
 **Last updated:** 2026-09-02
 
 ## 1. Purpose and safety boundary
@@ -128,12 +130,47 @@ independent-finality checks. Its result can enter
 `WalletRecoveryPlan::new_with_authenticated_target`; the birthday and target
 types cannot be interchanged.
 
-`CheckpointTrustPolicy::rotated` requires a strictly increasing local policy
-generation and replaces the complete publisher set. Removed keys immediately
-fail as unknown under the successor policy. Persisting the current generation
-in rollback-resistant platform storage and authenticating policy delivery remain
-operational gates; selecting an older policy would otherwise re-enable revoked
-keys.
+`CheckpointPolicyUpdateDraft` encodes a complete successor as:
+
+```text
+"VPOLY001" || chain_id_32 || predecessor_generation_be64 ||
+predecessor_policy_id_32 || successor_generation_be64 || threshold_u8 ||
+publisher_count_u8 || ordered(publisher_verifying_key_32)
+```
+
+The active predecessor threshold signs those exact bytes using the same ordered
+signature-record format. `verify_checkpoint_policy_update` requires the exact
+network, predecessor generation and predecessor policy ID, validates every new
+key, and constructs only a strictly newer complete policy. Omitted keys are
+revoked. The stable policy ID commits to the network, generation, threshold,
+count, and canonical key order under
+`vault.wallet.checkpoint-policy-id-v1.2026-09-02`.
+
+The deterministic two-of-three generation-1 to generation-2 update vector is
+379 bytes and has BLAKE3 hash
+`687555c09469a235a1b48f08293bf318e39cb568733998d8e4599837b332a666`.
+Its test rejects every single-byte mutation, every truncated prefix, and
+trailing data.
+
+`CheckpointPolicyStore` retains up to 64 authenticated updates from an
+independently pinned bootstrap policy in a single-owner Unix file. Each atomic
+replacement is synced with its parent directory. On every open it verifies the
+complete signature chain rather than trusting the checksum. Its checksum only
+detects corruption; authentication comes from the predecessor signatures.
+State and lock files are owner-only; relative paths, unsafe parent permissions,
+symlinks, hard-linked/non-regular state, concurrent owners, truncation, trailing
+bytes, and oversized histories fail closed.
+
+The store requires a `CheckpointPolicyRollbackGuard` implemented by approved
+platform storage. The guard anchors both generation and exact policy ID, not
+only a numeric floor. The protected anchor must occur in the replayed lineage,
+which rejects an older valid file, same-generation equivocation, and a higher
+branch that skips a previously anchored policy. Installation writes the signed
+log before advancing the protected anchor; any uncertain file or guard failure
+poisons the handle, and reopening replays the durable log before retrying the
+anchor. Concrete keychain/secure-element guard implementations, bootstrap
+ceremony, 64-update compaction/re-bootstrap, and operational rotation drills
+remain activation gates.
 
 The deterministic empty-frontier two-of-three test package is 347 bytes and has
 BLAKE3 hash
@@ -283,11 +320,12 @@ Still required before real funds:
 
 - concrete approved platform/hardware custody, hardware-backed derivation,
   memory locking, crash-dump policy, and an offline recovery-package ceremony;
-- authenticated publisher-policy delivery, rollback-resistant policy-generation
-  storage, operational rotation/revocation drills, and a conservative
-  user-facing override ceremony (birthday and target package formats,
-  threshold verification, independent-finality matching, and successor-policy
-  key removal are implemented);
+- concrete rollback-resistant platform guard storage, bootstrap and policy-log
+  compaction ceremonies, operational rotation/revocation drills, and a
+  conservative user-facing override ceremony (authenticated successor-policy
+  delivery, bounded Unix history, birthday/target package formats, threshold
+  verification, independent-finality matching, and successor key removal are
+  implemented);
 - a concrete validating full-node/light-client source plus private/padded
   compact-block transport; ordinary RPC agreement is not consensus finality;
 - reviewed product UX that never presents incomplete recovery as final;

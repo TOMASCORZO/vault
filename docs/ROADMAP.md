@@ -101,8 +101,9 @@ later milestones do not expand H1 cryptographic implementation.
   scoped custodian callback are implemented), trusted birthday and target
   checkpoint distribution (separate threshold-authenticated birthday/target
   packages, independent-finality matching, and monotonic successor policies are
-  implemented; operational policy delivery/rollback storage and the real H2
-  validating adapter remain),
+  implemented, as are predecessor-authenticated policy updates and the bounded
+  crash-consistent Unix policy history; concrete rollback-guard storage,
+  bootstrap/compaction operations, and the real H2 validating adapter remain),
   private/padded retrieval, product incomplete-recovery UX, backup rotation and restore drills,
   versioned migrations, checkpoint pruning/compaction and long-history growth,
   keychain/secure-element key plus rollback state, multi-platform stores,

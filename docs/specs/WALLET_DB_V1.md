@@ -190,8 +190,10 @@ This implementation is not release-ready. H1 still requires:
 - hardware/keychain root-key handling and a monotonic rollback counter;
 - concrete platform/hardware seed custody and its operational ceremony (the
   typed/checksummed import boundary is implemented), publisher-policy delivery
-  and rollback-resistant generation storage (authenticated birthday/target
-  packages and successor key removal are implemented),
+  and rollback-resistant generation storage (authenticated birthday/target and
+  successor-policy packages, successor key removal, the Unix policy history,
+  and its exact external anchor boundary are implemented; concrete protected
+  guard storage remains),
   a validating full-node/light-client recovery source, private retrieval,
   product incomplete-recovery UX, policy above 64 accounts, backup rotation,
   restore drills, multi-copy inventory,
