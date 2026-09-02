@@ -10,10 +10,16 @@
 //! platform key storage, crash injection, access-pattern benchmarks, and
 //! independent review remain H1 activation gates.
 
+mod checkpoint_distribution;
 mod custody;
 mod recovery;
 mod storage;
 
+pub use checkpoint_distribution::{
+    CheckpointDistributionDraft, CheckpointDistributionError, CheckpointPublisherSignature,
+    CheckpointTrustPolicy, MAX_CHECKPOINT_PUBLISHERS, checkpoint_publisher_id,
+    verify_birthday_checkpoint_distribution,
+};
 pub use custody::{
     WALLET_SEED_ENTROPY_BYTES, WALLET_SEED_RECOVERY_PACKAGE_BYTES, WalletSeedCustodian,
     WalletSeedCustodyError, WalletSeedImportError, WalletSeedMaterial,

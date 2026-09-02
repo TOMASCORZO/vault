@@ -2,8 +2,9 @@
 
 **Status:** production-intent typed seed-import boundary, deterministic account
 discovery, finalized target, durable progress, and birthday-frontier initialization
-implemented; platform custody, checkpoint distribution, operational UX, fault
-injection, and internal security review remain activation gates
+implemented; authenticated birthday-checkpoint distribution is implemented;
+platform custody, target distribution, operational UX, fault injection, and
+internal security review remain activation gates
 **Last updated:** 2026-09-02
 
 ## 1. Purpose and safety boundary
@@ -83,6 +84,45 @@ Ordinary `EncryptedWalletDb::create` accepts only the empty height-zero genesis
 tip. Every non-genesis start must use `create_from_recovery_plan`; there is no
 lower-level birthday creation API that can bypass account and completeness
 tracking.
+
+### 2.1 Authenticated birthday-checkpoint distribution
+
+`CheckpointDistributionDraft` encodes a validated birthday frontier and its
+claimed finalized boundary as:
+
+```text
+"VCKPT001" || chain_id_32 || height_be64 || block_hash_32 ||
+tree_size_be64 || tree_root_32 || leaf_present_u8 || leaf_32 ||
+ommer_count_u8 || ommers_32_each
+```
+
+Between 1 and 8 canonical records are then appended:
+
+```text
+signature_count_u8 || ordered(
+  publisher_id_32 || ed25519_signature_64
+)
+```
+
+Publisher IDs are BLAKE3 derive-key hashes of separately configured Ed25519
+verification keys under
+`vault.wallet.checkpoint-publisher-id-v1.2026-09-02`. The trust policy pins a
+network, a unique publisher set, and a nonzero threshold. Verification uses
+strict Ed25519 checks, requires strictly ordered unique known IDs, validates the
+bounded depth-32 frontier, and rejects truncation, trailing data, unknown keys,
+weak keys, insufficient signatures, and every signed-field mutation.
+
+Publisher threshold authenticates distribution only. The verifier also requires
+an independently consensus-verified `FinalizedCompactBlockHeader` whose network,
+height, block hash, post-tree size, and post-tree root exactly match the package.
+Provider or publisher agreement is never promoted to consensus finality. Target
+checkpoint distribution and operational publisher rotation/revocation remain
+open.
+
+The deterministic empty-frontier two-of-three test package is 347 bytes and has
+BLAKE3 hash
+`ed559ebbce82263c23f7b2e284d37d1c86bbf1d122dec8cc2fac72aefcae0a22`.
+The test rejects mutation at every byte and every truncated prefix.
 
 ## 3. Deterministic account discovery
 
@@ -227,8 +267,10 @@ Still required before real funds:
 
 - concrete approved platform/hardware custody, hardware-backed derivation,
   memory locking, crash-dump policy, and an offline recovery-package ceremony;
-- trusted birthday/target distribution with multi-source verification and a
-  conservative user-facing override ceremony;
+- target-checkpoint distribution, operational birthday-publisher
+  rotation/revocation, and a conservative user-facing override ceremony (the
+  threshold-authenticated birthday format and independent-finality match are
+  implemented);
 - a concrete validating full-node/light-client source plus private/padded
   compact-block transport; ordinary RPC agreement is not consensus finality;
 - reviewed product UX that never presents incomplete recovery as final;

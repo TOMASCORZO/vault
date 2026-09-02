@@ -66,19 +66,22 @@ The repository contains substantial production-intent H1 work, including:
 - canonical compact blocks, finalized-header authentication, local trial
   decryption, note-tree replay, encrypted transactional wallet storage, backups,
   a typed/checksummed seed-import and scoped-custodian boundary,
+  threshold-authenticated birthday-checkpoint packages that must match an
+  independently consensus-verified header,
   birthday-frontier recovery, deterministic seed account discovery, and bounded
   restart-safe recovery coordination;
 - output authorization, Noise XX pairing and KK signer transport, an encrypted
   peer registry, and crash-consistent Unix replay protection.
 
-The latest completed block is the bounded wallet recovery coordinator in
-`crates/vault-wallet/src/recovery.rs`, specified by
-`docs/specs/WALLET_RECOVERY_SYNC_V1.md`. It authenticates hostile compact-block
-bytes against an explicitly consensus-verified header-source boundary and commits
-one height at a time. The production full-node/light-client adapter does not yet
-exist.
+The latest completed A1 sub-blocks are the typed seed boundary in
+`crates/vault-wallet/src/custody.rs` and threshold-authenticated birthday
+distribution in `crates/vault-wallet/src/checkpoint_distribution.rs`. A package
+is accepted only when it also matches an independently consensus-verified
+header; publisher quorum is not finality. Target distribution, publisher
+operations, concrete custodians, and the production full-node/light-client
+adapter remain open, so A1 is not complete.
 
-The current cryptographic blocks are C1 and C2 in
+The bounded C1-C6 cryptographic workstreams are complete at the boundaries in
 `docs/H1_CLOSURE_MATRIX.md`. The isolated RISC Zero core has a versioned
 transfer-v2 statement that reconstructs canonical effects, owned input-note
 openings, Merkle membership, public nullifiers, `ak + alpha`, net-value

@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 blake3.workspace = true
 chacha20poly1305.workspace = true
+ed25519-dalek.workspace = true
 fs2.workspace = true
 incrementalmerkletree.workspace = true
 orchard.workspace = true
