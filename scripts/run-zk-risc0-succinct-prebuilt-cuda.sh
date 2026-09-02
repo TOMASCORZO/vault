@@ -39,7 +39,9 @@ done
 [[ "$output_path" == /* ]] || fail "the output receipt path must be absolute"
 [[ "$input_path" != "$output_path" ]] || fail "input and output paths must differ"
 
-[[ "$(manifest_value schema)" == "vault-c6-risc0-cuda-prebuild-v1" ]] || \
+manifest_schema="$(manifest_value schema)"
+[[ "$manifest_schema" == "vault-c6-risc0-cuda-prebuild-v1" || \
+   "$manifest_schema" == "vault-c6-risc0-cuda-prebuild-v2" ]] || \
   fail "unknown prebuild manifest schema"
 expected_binary_sha256="$(manifest_value binary_sha256)"
 [[ "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "invalid binary hash in build manifest"
@@ -55,8 +57,18 @@ gpu_compute_capability="$(
 )"
 [[ "$gpu_compute_capability" =~ ^[0-9]+$ ]] || fail "could not read GPU compute capability"
 actual_cuda_arch="sm_${gpu_compute_capability}"
-[[ "$actual_cuda_arch" == "$expected_cuda_arch" ]] || \
-  fail "bundle targets $expected_cuda_arch but selected GPU is $actual_cuda_arch"
+cuda_execution_mode=native-cubin
+cuda_ptx="$(manifest_value cuda_ptx)"
+allowed_runtime_arch="$(manifest_value allowed_runtime_arch)"
+if [[ "$actual_cuda_arch" != "$expected_cuda_arch" ]]; then
+  [[ "$manifest_schema" == "vault-c6-risc0-cuda-prebuild-v2" ]] || \
+    fail "bundle targets $expected_cuda_arch but selected GPU is $actual_cuda_arch"
+  [[ "$cuda_ptx" == "compute_90" && "$expected_cuda_arch" == "sm_90" && \
+     "$allowed_runtime_arch" == "sm_120" && "$actual_cuda_arch" == "sm_120" ]] || \
+    fail "bundle does not authorize $expected_cuda_arch PTX execution on $actual_cuda_arch"
+  cuda_execution_mode=forward-ptx-jit
+  export CUDA_FORCE_PTX_JIT=1
+fi
 
 actual_input_bytes="$(wc -c < "$input_path" | tr -d '[:space:]')"
 [[ "$actual_input_bytes" == "$expected_input_bytes" ]] || \
@@ -91,7 +103,10 @@ mkdir -p "$(dirname "$output_path")"
   echo "host=$(uname -a)"
   echo "system_memory_mib=$system_memory_mib"
   echo "cuda_visible_devices=$selected_gpu"
-  echo "cuda_arch=$actual_cuda_arch"
+  echo "cuda_bundle_arch=$expected_cuda_arch"
+  echo "cuda_runtime_arch=$actual_cuda_arch"
+  echo "cuda_execution_mode=$cuda_execution_mode"
+  [[ -z "$cuda_ptx" ]] || echo "cuda_ptx=$cuda_ptx"
   echo "gpu:"
   nvidia-smi -i "$selected_gpu" \
     --query-gpu=index,name,memory.total,driver_version \
@@ -156,6 +171,9 @@ fi
   echo "schema=vault-c6-risc0-succinct-compression-evidence-v1"
   echo "source_commit=$(manifest_value source_commit)"
   echo "binary_sha256=$actual_binary_sha256"
+  echo "cuda_bundle_arch=$expected_cuda_arch"
+  echo "cuda_runtime_arch=$actual_cuda_arch"
+  echo "cuda_execution_mode=$cuda_execution_mode"
   echo "input_receipt_bytes=$actual_input_bytes"
   echo "input_receipt_sha256=$actual_input_sha256"
   echo "output_receipt_kind=succinct"

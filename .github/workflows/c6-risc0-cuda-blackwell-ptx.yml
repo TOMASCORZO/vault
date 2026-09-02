@@ -1,0 +1,72 @@
+name: c6-risc0-cuda-blackwell-ptx
+
+on:
+  push:
+    branches:
+      - codex/c1-transfer-v2
+    paths:
+      - .github/workflows/c6-risc0-cuda-blackwell-ptx.yml
+      - scripts/run-zk-risc0-succinct-prebuilt-cuda.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: nvidia/cuda:12.8.1-devel-ubuntu24.04
+    steps:
+      - name: Install download dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify PTX and package Blackwell runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=vault-c6-risc0-cuda-prebuild-sm_90.tar.gz
+          curl --fail --location \
+            "https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/$archive" \
+            --output "$archive"
+          curl --fail --location \
+            "https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/$archive.sha256" \
+            --output "$archive.sha256"
+          sha256sum --check "$archive.sha256"
+          tar -xzf "$archive"
+
+          cuobjdump --list-ptx c6-prebuild/vault-c6-risc0-succinct-test \
+            > c6-prebuild/cuobjdump-ptx-list.txt
+          test -s c6-prebuild/cuobjdump-ptx-list.txt
+          cuobjdump --dump-ptx c6-prebuild/vault-c6-risc0-succinct-test \
+            > /tmp/c6-ptx.txt
+          grep -Eq '\.target[[:space:]]+sm_90' /tmp/c6-ptx.txt
+
+          install -m 0755 scripts/run-zk-risc0-succinct-prebuilt-cuda.sh \
+            c6-prebuild/run-zk-risc0-succinct-prebuilt-cuda.sh
+          sed -i \
+            's/schema=vault-c6-risc0-cuda-prebuild-v1/schema=vault-c6-risc0-cuda-prebuild-v2/' \
+            c6-prebuild/build.manifest.txt
+          {
+            echo 'cuda_ptx=compute_90'
+            echo 'allowed_runtime_arch=sm_120'
+            echo "runner_source_commit=${GITHUB_SHA}"
+          } >> c6-prebuild/build.manifest.txt
+
+          output=vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz
+          tar -czf "$output" c6-prebuild
+          sha256sum "$output" > "$output.sha256"
+      - name: Upload Blackwell PTX bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vault-c6-risc0-cuda-prebuild-sm_120-ptx90-${{ github.sha }}
+          path: |
+            vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz
+            vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
