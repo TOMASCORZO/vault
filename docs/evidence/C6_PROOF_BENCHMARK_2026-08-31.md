@@ -115,9 +115,11 @@ No Succinct measurement exists until that procedure actually completes.
 
 The prerelease `c6-risc0-cuda-prebuild-v1` contains verified standalone
 archives for Ada `sm_89` and Hopper `sm_90`, built from
-`b4482a961f95ac74f6bf981a080ab047604bb516`. The `sm_120` attempt exhausted the
-GitHub runner's RAM and is excluded; it is not required for the planned H100 or
-L40S execution.
+`b4482a961f95ac74f6bf981a080ab047604bb516`. Native `sm_120` compilation
+exhausted the GitHub runner's RAM. CI subsequently verified the embedded
+`compute_90` PTX with `cuobjdump` and published the RTX 5090 forward-JIT package
+as prerelease `c6-risc0-cuda-prebuild-v2`, using runner commit
+`bfa534aae8387e9f1f97c06a9f6c4b744fc964e8`.
 
 1. Run the single prebuilt Composite-to-Succinct classification gate on
    declared CUDA hardware and preserve its receipt, log, manifest, environment,

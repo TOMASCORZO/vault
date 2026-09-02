@@ -39,15 +39,20 @@ Never compile or install Rust on a billed GPU host.
    canonical `/workspace/vault` path inside
    `nvidia/cuda:12.8.1-devel-ubuntu24.04`, reproduces the reviewed guest ID, and
    uploads separate standalone bundles for Ada `sm_89` and Hopper `sm_90`.
-   Explicit targets are required because GitHub exposes no GPU for RISC Zero's
-   default `nvcc -arch=native` detection.
+   A second no-compile CI job verifies the embedded `compute_90` PTX with
+   `cuobjdump` and packages the Blackwell `sm_120` forward-JIT runner. Explicit
+   targets are required because GitHub exposes no GPU for RISC Zero's default
+   `nvcc -arch=native` detection.
 3. Choose the bundle matching the exact rented GPU, then download and verify
    that CI artifact on the development machine.
-4. Publish the verified archives as prerelease
+4. Publish the native archives as prerelease
    `c6-risc0-cuda-prebuild-v1` before starting a rental. The reviewed `sm_89`
    and `sm_90` archives are published from source commit
    `b4482a961f95ac74f6bf981a080ab047604bb516`.
-5. Confirm that both release URLs below return successfully and retain their
+   The verified RTX 5090 forward-PTX archive is published as prerelease
+   `c6-risc0-cuda-prebuild-v2`; its runner is from
+   `bfa534aae8387e9f1f97c06a9f6c4b744fc964e8`.
+5. Confirm that both selected release URLs below return successfully and retain their
    expected SHA-256 values.
 
 The paid host downloads only:
@@ -70,11 +75,11 @@ Use one non-preemptible Linux x86_64 host with:
   12.8 image confirmed by the bundle's `ldd.txt`;
 - SSH access.
 
-Select the archive by compute capability: RTX 4090/L4/L40/L40S use `sm_89`, and
-H100/H200 use `sm_90`. Do not use a bundle for a different architecture; the
-runner rejects a mismatch before proving. No `sm_120` archive is published:
-even one Blackwell `nvcc` compilation exceeded the GitHub runner's RAM. Do not
-rent an RTX 5090 for this run.
+Select the archive by compute capability: RTX 4090/L4/L40/L40S use the native
+`sm_89` v1 archive, H100/H200 use the native `sm_90` v1 archive, and RTX 5090
+uses the `sm_120-ptx90` v2 archive. Native Blackwell compilation exceeded the
+GitHub runner's RAM, so v2 uses the verified `compute_90` PTX embedded by CUDA
+12.8 and forces driver JIT on `sm_120`. The runner rejects every other mismatch.
 
 The first recursion run has no measured peak VRAM, so 32 GiB is a hypothesis,
 not a guarantee. Do not use a spot/preemptible host.
@@ -89,8 +94,8 @@ mkdir -p /workspace/c6 /workspace/evidence
 cd /workspace/c6
 
 curl --fail --location \
-  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild-sm_90.tar.gz \
-  --output vault-c6-risc0-cuda-prebuild-sm_90.tar.gz &
+  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v2/vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz \
+  --output vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz &
 bundle_download_pid=$!
 curl --fail --location \
   https://github.com/TOMASCORZO/vault/releases/download/c4-risc0-transfer-v2-v1/vault-c1-transfer-v2.receipt.bin \
@@ -99,17 +104,17 @@ receipt_download_pid=$!
 wait "$bundle_download_pid" "$receipt_download_pid"
 
 curl --fail --location \
-  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v1/vault-c6-risc0-cuda-prebuild-sm_90.tar.gz.sha256 \
-  --output vault-c6-risc0-cuda-prebuild-sm_90.tar.gz.sha256
-sha256sum --check vault-c6-risc0-cuda-prebuild-sm_90.tar.gz.sha256
+  https://github.com/TOMASCORZO/vault/releases/download/c6-risc0-cuda-prebuild-v2/vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz.sha256 \
+  --output vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz.sha256
+sha256sum --check vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz.sha256
 echo '12c952e2da0466d7047586404b15c7ad6fa59675bb8c975019b4645dca7e6e96  /workspace/evidence/vault-c1-transfer-v2.receipt.bin' |
   sha256sum --check
-tar -xzf vault-c6-risc0-cuda-prebuild-sm_90.tar.gz
+tar -xzf vault-c6-risc0-cuda-prebuild-sm_120-ptx90.tar.gz
 nvidia-smi
 ```
 
-The example uses `sm_90`; substitute `sm_89` in all four archive references
-when that is the selected GPU's capability.
+The example is frozen for RTX 5090 `sm_120`. Use the v1 URLs only when renting
+one of the native architectures described above.
 
 Run the prebuilt test directly:
 
@@ -131,10 +136,11 @@ seconds.
 
 Expected billed setup is only boot/SSH plus roughly 400 MB of parallel
 downloads and a sub-minute preflight. Compression time is deliberately not
-estimated until measured; it should dominate the rental. Do not rebuild the
-base receipt, clone the repository, update packages, or troubleshoot a build on
-the GPU. If the preflight fails, stop and destroy the host rather than repairing
-it under billing.
+estimated until measured; it should dominate the rental. On RTX 5090, the first
+kernel load also includes the one-time PTX JIT. Do not rebuild the base receipt,
+clone the repository, update packages, or troubleshoot a build on the GPU. If
+the preflight fails, stop and destroy the host rather than repairing it under
+billing.
 
 After the runner exits, immediately copy these five files off the host:
 
