@@ -25,6 +25,10 @@ zeroize.workspace = true
 libc.workspace = true
 rustix.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework.workspace = true
+security-framework-sys.workspace = true
+
 [dev-dependencies]
 rand_chacha = "0.3.1"
 

@@ -195,10 +195,17 @@ which rejects an older valid file, same-generation equivocation, and a higher
 branch that skips a previously anchored policy. Installation writes the signed
 log before advancing the protected anchor; any uncertain file or guard failure
 poisons the handle, and reopening replays the durable log before retrying the
-anchor. Concrete keychain/secure-element guard implementations, the real
-publisher selection/key-custody/release-pinning ceremony, 64-update
-compaction/re-bootstrap, and operational rotation drills remain activation
-gates.
+anchor. The production-intent macOS implementation stores a non-synchronizing,
+scope-bound record in the local Keychain and serializes updates with an
+owner-only cross-process lock. Creation anchors before publishing the policy
+file, while opening existing state rejects a missing protected anchor. Its real
+macOS test covers persistence, scope separation, monotonic advancement,
+regression, and same-generation equivocation. It does not claim resistance to
+a privileged rollback of the complete login Keychain; the signed-app Data
+Protection Keychain profile and Windows TPM parity remain platform hardening.
+The real publisher selection/key-custody/release-pinning ceremony, 64-update
+compaction/re-bootstrap, and operational rotation drills also remain activation
+gates. See `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`.
 
 The deterministic empty-frontier two-of-three test package is 347 bytes and has
 BLAKE3 hash
@@ -348,8 +355,9 @@ Still required before real funds:
 
 - concrete approved platform/hardware custody, hardware-backed derivation,
   memory locking, crash-dump policy, and an offline recovery-package ceremony;
-- concrete rollback-resistant platform guard storage, real publisher
-  selection/key custody/release pinning and policy-log compaction ceremonies,
+- Windows TPM rollback-guard parity and the signed-app macOS Data Protection
+  Keychain profile; real publisher selection/key custody/release pinning and
+  policy-log compaction ceremonies,
   operational rotation/revocation drills, and a
   conservative user-facing override ceremony (authenticated successor-policy
   delivery, proof-of-possession bootstrap packages with an external policy-ID

@@ -248,9 +248,17 @@ Implemented production-intent foundation:
 
 Remaining A1 checkpoints:
 
-- [ ] **A1-CP1 — concrete rollback guard.** Implement and test at least one
-  approved keychain/secure-element/TPM-backed `CheckpointPolicyRollbackGuard`
-  that durably scopes and protects both generation and exact policy ID.
+- [x] **A1-CP1 — concrete rollback guard (macOS).** A production-intent local,
+  non-synchronizing Keychain adapter durably scopes generation and exact policy
+  ID by network/bootstrap, serializes cross-process updates, verifies write-back,
+  and rejects regression, equivocation, unsafe paths, and missing anchors on
+  existing policy state. Real-device persistence and adversarial codec/path
+  tests pass. This is not a Secure Enclave monotonic-counter claim.
+  Evidence: `docs/evidence/A1_MACOS_KEYCHAIN_2026-09-03.md`.
+- [ ] **A1-CP1-WIN — Windows rollback-guard parity.** Implement and test the
+  TPM 2.0-backed profile, including NV freshness, crash recovery, reboot
+  persistence, TPM reset detection, and no software fallback. The exact handoff
+  is in `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`.
 - [ ] **A1-CP2 — checkpoint bootstrap ceremony.** The canonical artifact,
   all-publisher proof of possession, external policy-ID verification, and
   policy-store enforcement are implemented. Still define and execute actual
@@ -319,7 +327,9 @@ Remaining A2 checkpoints:
 - [ ] Implement private and padded compact-block retrieval so peers/providers do
   not learn the wallet birthday, target interval, matches, or stopping point.
 - [ ] Implement concrete keychain/secure-element protection for wallet database
-  keys, backup keys, finalized-height floor, and checkpoint-policy anchor.
+  keys, backup keys, and finalized-height floor. The macOS checkpoint-policy
+  anchor is implemented; its signed-app Data Protection Keychain profile and
+  Windows TPM parity remain.
 - [ ] Implement and conformance-test non-Unix platform stores with equivalent
   ownership, no-follow, locking, atomicity, durability, and rollback guarantees.
 - [ ] Benchmark file growth, query/access timing, retrieval bandwidth, padding,

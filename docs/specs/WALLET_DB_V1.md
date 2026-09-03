@@ -192,8 +192,9 @@ This implementation is not release-ready. H1 still requires:
   typed/checksummed import boundary is implemented), publisher-policy delivery
   and rollback-resistant generation storage (authenticated birthday/target and
   successor-policy packages, successor key removal, the Unix policy history,
-  and its exact external anchor boundary are implemented; concrete protected
-  guard storage remains),
+  its exact external anchor boundary, and the local non-synchronizing macOS
+  Keychain guard are implemented; signed-app Data Protection Keychain and
+  Windows TPM profiles remain),
   a validating full-node/light-client recovery source, private retrieval,
   product incomplete-recovery UX, policy above 64 accounts, backup
   retention/scheduling and multi-copy inventory (verified no-clobber rotation

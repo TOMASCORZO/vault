@@ -46,6 +46,13 @@ pub struct CheckpointPolicyAnchor {
 }
 
 impl CheckpointPolicyAnchor {
+    pub(crate) const fn from_parts(generation: u64, policy_id: [u8; 32]) -> Self {
+        Self {
+            generation,
+            policy_id,
+        }
+    }
+
     /// Constructs the anchor for a verified policy.
     #[must_use]
     pub fn from_policy(policy: &CheckpointTrustPolicy) -> Self {
@@ -221,7 +228,7 @@ impl CheckpointPolicyStore {
         let chain_id = bootstrap.chain_id();
         let bootstrap_policy_id = bootstrap.policy_id();
         let bootstrap_anchor = CheckpointPolicyAnchor::from_policy(&bootstrap);
-        let mut store = Self {
+        let store = Self {
             file,
             chain_id,
             bootstrap_policy_id,
@@ -230,14 +237,11 @@ impl CheckpointPolicyStore {
             current: bootstrap,
             poisoned: false,
         };
+        store.initialize_guard(guard)?;
         store
             .file
             .replace(&store.encode())
             .map_err(map_file_error)?;
-        if let Err(error) = store.synchronize_guard(guard) {
-            store.poisoned = true;
-            return Err(error);
-        }
         Ok(store)
     }
 
@@ -324,13 +328,37 @@ impl CheckpointPolicyStore {
         guard: &mut G,
     ) -> Result<(), CheckpointPolicyStoreError> {
         let expected = CheckpointPolicyAnchor::from_policy(&self.current);
+        let protected = guard
+            .load_anchor(self.chain_id, self.bootstrap_policy_id)
+            .map_err(|_| CheckpointPolicyStoreError::RollbackGuardFailure)?
+            .ok_or(CheckpointPolicyStoreError::RollbackGuardFailure)?;
+        if !self.anchors.contains(&protected) {
+            return Err(CheckpointPolicyStoreError::RollbackDetected);
+        }
+        guard
+            .advance_anchor(self.chain_id, self.bootstrap_policy_id, expected)
+            .map_err(|_| CheckpointPolicyStoreError::RollbackGuardFailure)?;
+        if guard
+            .load_anchor(self.chain_id, self.bootstrap_policy_id)
+            .map_err(|_| CheckpointPolicyStoreError::RollbackGuardFailure)?
+            != Some(expected)
+        {
+            return Err(CheckpointPolicyStoreError::RollbackGuardFailure);
+        }
+        Ok(())
+    }
+
+    fn initialize_guard<G: CheckpointPolicyRollbackGuard>(
+        &self,
+        guard: &mut G,
+    ) -> Result<(), CheckpointPolicyStoreError> {
+        let expected = CheckpointPolicyAnchor::from_policy(&self.current);
         if let Some(protected) = guard
             .load_anchor(self.chain_id, self.bootstrap_policy_id)
             .map_err(|_| CheckpointPolicyStoreError::RollbackGuardFailure)?
+            && protected != expected
         {
-            if !self.anchors.contains(&protected) {
-                return Err(CheckpointPolicyStoreError::RollbackDetected);
-            }
+            return Err(CheckpointPolicyStoreError::RollbackDetected);
         }
         guard
             .advance_anchor(self.chain_id, self.bootstrap_policy_id, expected)
@@ -995,6 +1023,11 @@ mod tests {
         assert_eq!(
             CheckpointPolicyStore::create(&path, bootstrap.clone(), &mut guard).unwrap_err(),
             CheckpointPolicyStoreError::StateAlreadyExists
+        );
+        let mut erased_guard = MemoryGuard::default();
+        assert_eq!(
+            CheckpointPolicyStore::open(&path, bootstrap.clone(), &mut erased_guard).unwrap_err(),
+            CheckpointPolicyStoreError::RollbackGuardFailure
         );
 
         let wrong_bootstrap = CheckpointTrustPolicy::new(

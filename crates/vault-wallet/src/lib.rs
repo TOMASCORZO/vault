@@ -6,14 +6,16 @@
 //! volatile production store, or spendable unfinalized-note path. Its first
 //! encrypted transactional ShardTree store is production-intent, not release
 //! ready: concrete platform/hardware seed custody, trusted birthday/target
-//! bootstrap and rollback-guard operations, recovery policy beyond the bounded
-//! account range, migrations, platform key storage, crash injection,
+//! bootstrap operations, Windows TPM rollback parity, recovery policy beyond
+//! the bounded account range, migrations, platform key storage, crash injection,
 //! access-pattern benchmarks, and independent review remain H1 activation
 //! gates.
 
 mod checkpoint_distribution;
 mod checkpoint_policy_store;
 mod custody;
+#[cfg(target_os = "macos")]
+mod macos_keychain_guard;
 mod recovery;
 mod storage;
 
@@ -34,6 +36,8 @@ pub use custody::{
     WALLET_SEED_ENTROPY_BYTES, WALLET_SEED_RECOVERY_PACKAGE_BYTES, WalletSeedCustodian,
     WalletSeedCustodyError, WalletSeedImportError, WalletSeedMaterial,
 };
+#[cfg(target_os = "macos")]
+pub use macos_keychain_guard::MacOsKeychainRollbackGuard;
 pub use recovery::{
     FinalizedRecoverySource, MAX_RECOVERY_BLOCKS_PER_ADVANCE, WalletRecoveryAdvance,
     WalletRecoveryCoordinatorError, WalletRecoveryCoordinatorFailure, advance_seed_recovery,
