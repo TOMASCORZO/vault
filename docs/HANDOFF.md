@@ -21,9 +21,11 @@ task, or session change. Do not infer project status from a prompt such as
 ### Repository continuation point
 
 The authoritative continuation branch is `codex/c1-transfer-v2` on
-`https://github.com/TOMASCORZO/vault`. Its latest published commits are:
+`https://github.com/TOMASCORZO/vault`. Recent published implementation commits
+include:
 
 ```text
+24eb8d2 Close Windows TPM reboot acceptance
 64d28ec Implement Windows TPM rollback guard
 a8d2904 Protect checkpoint policy rollback on macOS
 988cfa5 Authenticate checkpoint policy bootstrap
