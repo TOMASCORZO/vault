@@ -223,7 +223,11 @@ one ran on the boot that began `2026-08-29 20:13:38`; after Windows restarted at
 anchor and removed every isolated test resource. The final Windows workspace,
 strict Clippy/rustdoc, WSL Linux parity, and advisory gates pass. The exact next
 roadmap task is `A1-CP2`, the real checkpoint-bootstrap ceremony and its
-operator/release evidence. C1-C6 remain closed and no GPU is needed.
+operator/release evidence. Its approved three-device `2-of-3` action plan,
+including tooling, rehearsal, final ceremony, external pinning, and public-root
+recovery, is in `docs/runbooks/A1_CP2_BOOTSTRAP_CEREMONY.md`. The final ceremony
+is blocked on three independent custodians and a frozen target-network chain ID;
+disposable rehearsals do not close CP2. C1-C6 remain closed and no GPU is needed.
 
 No cryptographic comparison rental remains. C6 is complete and selects Halo2
 as the base-layer proof candidate. Stable Halo2 parameter/key serialization and

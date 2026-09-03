@@ -270,7 +270,10 @@ Remaining A1 checkpoints:
   policy-store enforcement are implemented. Still define and execute actual
   publisher selection, offline key custody, threshold approval, binary or
   release-manifest pinning, independent operator confirmation, and recovery
-  from a lost bootstrap artifact.
+  from a lost bootstrap artifact. The approved action plan uses three
+  independent offline signers with a `2-of-3` operational threshold; all three
+  must sign the initial bootstrap. See
+  `docs/runbooks/A1_CP2_BOOTSTRAP_CEREMONY.md`.
 - [ ] **A1-CP3 — checkpoint history compaction.** Define and test the explicit
   re-bootstrap/compaction ceremony before the 64-update bound, preserving the
   protected lineage without accepting an older or alternate branch.
