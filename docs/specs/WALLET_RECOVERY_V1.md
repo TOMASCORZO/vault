@@ -202,7 +202,20 @@ file, while opening existing state rejects a missing protected anchor. Its real
 macOS test covers persistence, scope separation, monotonic advancement,
 regression, and same-generation equivocation. It does not claim resistance to
 a privileged rollback of the complete login Keychain; the signed-app Data
-Protection Keychain profile and Windows TPM parity remain platform hardening.
+Protection Keychain profile remains platform hardening.
+
+The production-intent Windows implementation uses a SHA-256 TPM 2.0 NV extend
+index through native TBS and wraps its random index authorization with a
+non-exportable Microsoft Platform Crypto Provider key. Scope-bound checksummed
+state and a pending journal distinguish the exact old TPM digest from the exact
+already-advanced digest, so recovery extends once or commits once and rejects
+all other states. Provisioning requires elevation; ordinary opens and advances
+do not. Missing/reset TPM state, a missing key, wrong public attributes,
+rollback, equivocation, and skipped generations fail closed with no software
+fallback. Live TPM interruption, deletion, two-process contention, and valid
+policy-file rollback tests pass; the final two-phase real reboot check remains
+before `A1-CP1-WIN` closure. See
+`docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
 The real publisher selection/key-custody/release-pinning ceremony, 64-update
 compaction/re-bootstrap, and operational rotation drills also remain activation
 gates. See `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`.
@@ -355,8 +368,8 @@ Still required before real funds:
 
 - concrete approved platform/hardware custody, hardware-backed derivation,
   memory locking, crash-dump policy, and an offline recovery-package ceremony;
-- Windows TPM rollback-guard parity and the signed-app macOS Data Protection
-  Keychain profile; real publisher selection/key custody/release pinning and
+- final Windows TPM cross-reboot acceptance and the signed-app macOS Data
+  Protection Keychain profile; real publisher selection/key custody/release pinning and
   policy-log compaction ceremonies,
   operational rotation/revocation drills, and a
   conservative user-facing override ceremony (authenticated successor-policy

@@ -86,12 +86,14 @@ checkpoint package is accepted only when it also matches an independently
 consensus-verified header; publisher quorum is not finality. Successor policies
 are authenticated by their exact predecessor, remove revoked keys, and are
 replayed from a pinned bootstrap. The store anchors generation plus policy ID
-through a platform boundary. A production-intent macOS adapter now stores this
+through a platform boundary. A production-intent macOS adapter stores this
 anchor in the local non-synchronizing Keychain and uses an owner-only
-scope-specific cross-process lock. Existing policy state fails closed if its
-Keychain anchor is missing. This is not a Secure Enclave monotonic-counter or
-whole-system-rollback claim. Windows TPM parity, the signed-app macOS Data
-Protection Keychain profile, real publisher selection/offline
+scope-specific cross-process lock. A production-intent Windows adapter now uses
+native TBS with TPM 2.0 NV freshness and a non-exportable Platform Crypto
+Provider key. Existing policy state fails closed if its protected anchor is
+missing. The macOS profile is not a Secure Enclave monotonic-counter or
+whole-system-rollback claim. Final Windows cross-reboot acceptance, the
+signed-app macOS Data Protection Keychain profile, real publisher selection/offline
 custody/release pinning, compaction operations, concrete custodians, and the
 production full-node/light-client adapter remain open, so A1 is not complete.
 The backup path also has a verified no-clobber export operation that restores
@@ -202,15 +204,26 @@ existing state refuses an absent anchor. Successor installation remains
 log-first so a valid one-generation-ahead log can recover after an interrupted
 guard update.
 
-The exact next platform task is `A1-CP1-WIN`. On the Windows machine, pull this
-branch and follow
-`docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`. Prefer TPM 2.0 NV
-freshness through native Windows APIs; Credential Manager or DPAPI encryption
-alone is not rollback protection. Implement a separately gated
-`WindowsTpmRollbackGuard`, fail closed when TPM state is absent/reset, add a
-crash-recoverable pending journal for the file/TPM boundary, and run the listed
-real-hardware reboot/interruption/adversarial tests. Do not add a software
-fallback and do not modify C1-C6. No GPU is needed.
+`A1-CP1-WIN` is implemented at production intent through native Windows TBS,
+TPM 2.0 SHA-256 NV extend state, and a non-exportable Microsoft Platform Crypto
+Provider wrapping key. Provision is elevated once; ordinary operations are not.
+The exact checked state/pending journals, write-through replacement,
+cross-process lock, no-software-fallback behavior, and Windows policy-file store
+are implemented. Live hardware tests passed for persistence/reopen, real
+two-process contention, both interruption boundaries, regression/equivocation,
+valid policy-file rollback, exact NV deletion/reset detection, and cleanup.
+Evidence and residual risks are in
+`docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
+
+The exact continuation point is phase two of the real reboot test in
+`docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`. Phase one passed on the
+boot that began `2026-08-29 20:13:38` local time and intentionally left one
+isolated test scope in `%TEMP%\Vault-A1-CP1-WIN-reboot-v1`. Restart Windows
+before running phase two elevated; phase two verifies/advances the same TPM
+anchor and cleans the exact test resources. Then update the evidence and check
+`A1-CP1-WIN` complete. The full Windows workspace, strict Clippy/rustdoc, WSL
+Linux parity, and advisory gates already pass and should be rerun only if code
+changes. C1-C6 remain closed and no GPU is needed.
 
 No cryptographic comparison rental remains. C6 is complete and selects Halo2
 as the base-layer proof candidate. Stable Halo2 parameter/key serialization and
@@ -315,9 +328,9 @@ cryptographic scope.
 > stated boundaries. The real RISC Zero
 > receipt is published in release `c4-risc0-transfer-v2-v1`; do not restart
 > proving. Preserve C1-C6 as complete at their stated boundaries and continue
-> with `A1-CP1-WIN` using the exact checklist in
-> `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`; the macOS Keychain guard
-> is already implemented and tested. Keep activation and H2 separate. Do not
+> with the `A1-CP1-WIN` two-phase real reboot acceptance and final gates in
+> `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`; the implementation and
+> other live Windows TPM tests already pass. Keep activation and H2 separate. Do not
 > create prototypes,
 > expand H1 with
 > H2/mainnet work, start contracts, use real funds, or claim production

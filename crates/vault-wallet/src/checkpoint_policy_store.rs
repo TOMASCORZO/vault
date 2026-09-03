@@ -7,8 +7,9 @@
 
 use core::fmt;
 use std::{
-    fs::File,
+    fs::{self, File, OpenOptions},
     io::Write,
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
@@ -21,13 +22,10 @@ use crate::{
     verify_checkpoint_policy_update,
 };
 
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "windows"))]
 use fs2::FileExt;
-#[cfg(unix)]
-use std::{
-    fs::{self, OpenOptions},
-    io::{self, Read},
-};
+#[cfg(target_os = "windows")]
+use vault_windows_platform::replace_file_write_through;
 
 const POLICY_LOG_MAGIC: [u8; 8] = *b"VPLG0001";
 const POLICY_LOG_CHECKSUM_DOMAIN: &str = "vault.wallet.checkpoint-policy-log-v1.2026-09-02";
@@ -46,6 +44,7 @@ pub struct CheckpointPolicyAnchor {
 }
 
 impl CheckpointPolicyAnchor {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub(crate) const fn from_parts(generation: u64, policy_id: [u8; 32]) -> Self {
         Self {
             generation,
@@ -508,10 +507,10 @@ impl<'a> PolicyLogReader<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PolicyFileError {
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, target_os = "windows")))]
     UnsupportedPlatform,
     InvalidPath,
-    #[cfg(unix)]
+    #[cfg(any(unix, target_os = "windows"))]
     LockContended,
     CorruptFile,
     IoFailure,
@@ -528,11 +527,53 @@ impl LockedPolicyFile {
         {
             Self::open_unix(path.as_ref())
         }
-        #[cfg(not(unix))]
+        #[cfg(target_os = "windows")]
+        {
+            Self::open_windows(path.as_ref())
+        }
+        #[cfg(not(any(unix, target_os = "windows")))]
         {
             let _ = path;
             Err(PolicyFileError::UnsupportedPlatform)
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn open_windows(requested: &Path) -> Result<Self, PolicyFileError> {
+        if !requested.is_absolute() {
+            return Err(PolicyFileError::InvalidPath);
+        }
+        let file_name = requested
+            .file_name()
+            .ok_or(PolicyFileError::InvalidPath)?
+            .to_os_string();
+        let requested_parent = requested.parent().ok_or(PolicyFileError::InvalidPath)?;
+        reject_windows_reparse_point(requested_parent, true)?;
+        let parent =
+            fs::canonicalize(requested_parent).map_err(|_| PolicyFileError::InvalidPath)?;
+        if !parent.is_dir() {
+            return Err(PolicyFileError::InvalidPath);
+        }
+        reject_windows_reparse_point(&parent, true)?;
+        let path = parent.join(&file_name);
+        reject_windows_reparse_point(&path, false)?;
+        let mut lock_name = file_name;
+        lock_name.push(".lock");
+        let lock_path = parent.join(lock_name);
+        reject_windows_reparse_point(&lock_path, false)?;
+        let lock_file = open_windows_file(&lock_path, true)?;
+        match lock_file.try_lock_exclusive() {
+            Ok(()) => {}
+            Err(error) if is_windows_lock_contended(&error) => {
+                return Err(PolicyFileError::LockContended);
+            }
+            Err(_) => return Err(PolicyFileError::IoFailure),
+        }
+        reject_windows_reparse_point(&path, false)?;
+        Ok(Self {
+            path,
+            _lock_file: lock_file,
+        })
     }
 
     #[cfg(unix)]
@@ -573,7 +614,7 @@ impl LockedPolicyFile {
     }
 
     fn read_bounded(&self, maximum_bytes: usize) -> Result<Option<Vec<u8>>, PolicyFileError> {
-        #[cfg(unix)]
+        #[cfg(any(unix, target_os = "windows"))]
         {
             match fs::symlink_metadata(&self.path) {
                 Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
@@ -583,7 +624,10 @@ impl LockedPolicyFile {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
                 Err(_) => return Err(PolicyFileError::IoFailure),
             }
+            #[cfg(unix)]
             let mut file = open_owner_only_file(&self.path, false)?;
+            #[cfg(target_os = "windows")]
+            let mut file = open_windows_file(&self.path, false)?;
             let length = usize::try_from(
                 file.metadata()
                     .map_err(|_| PolicyFileError::IoFailure)?
@@ -606,7 +650,7 @@ impl LockedPolicyFile {
             }
             Ok(Some(bytes))
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, target_os = "windows")))]
         {
             let _ = maximum_bytes;
             Err(PolicyFileError::UnsupportedPlatform)
@@ -632,14 +676,82 @@ impl LockedPolicyFile {
             .as_file_mut()
             .sync_all()
             .map_err(|_| PolicyFileError::IoFailure)?;
-        let persisted = temporary
-            .persist(&self.path)
-            .map_err(|_| PolicyFileError::IoFailure)?;
-        persisted
-            .sync_all()
-            .map_err(|_| PolicyFileError::IoFailure)?;
+        #[cfg(unix)]
+        {
+            let persisted = temporary
+                .persist(&self.path)
+                .map_err(|_| PolicyFileError::IoFailure)?;
+            persisted
+                .sync_all()
+                .map_err(|_| PolicyFileError::IoFailure)?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let temporary_path = temporary.into_temp_path();
+            replace_file_write_through(&temporary_path, &self.path)
+                .map_err(|_| PolicyFileError::IoFailure)?;
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&self.path)
+                .and_then(|file| file.sync_all())
+                .map_err(|_| PolicyFileError::IoFailure)?;
+        }
         sync_parent_directory(parent)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn reject_windows_reparse_point(path: &Path, must_exist: bool) -> Result<(), PolicyFileError> {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+                || (!metadata.is_file() && !metadata.is_dir()) =>
+        {
+            Err(PolicyFileError::InvalidPath)
+        }
+        Ok(_) => Ok(()),
+        Err(error) if !must_exist && error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(PolicyFileError::InvalidPath),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_windows_file(path: &Path, create: bool) -> Result<File, PolicyFileError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(create)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    let file = options.open(path).map_err(|_| PolicyFileError::IoFailure)?;
+    let metadata = file.metadata().map_err(|_| PolicyFileError::IoFailure)?;
+    if !metadata.is_file() {
+        return Err(PolicyFileError::InvalidPath);
+    }
+    reject_windows_reparse_point(path, true)?;
+    Ok(file)
+}
+
+#[cfg(target_os = "windows")]
+fn is_windows_lock_contended(error: &io::Error) -> bool {
+    const ERROR_LOCK_VIOLATION: i32 = 33;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    error.kind() == io::ErrorKind::WouldBlock
+        || matches!(
+            error.raw_os_error(),
+            Some(ERROR_LOCK_VIOLATION) | Some(ERROR_SHARING_VIOLATION)
+        )
 }
 
 #[cfg(unix)]
@@ -711,32 +823,44 @@ fn sync_parent_directory(parent: &Path) -> Result<(), PolicyFileError> {
         .map_err(|_| PolicyFileError::IoFailure)
 }
 
-#[cfg(not(unix))]
+#[cfg(target_os = "windows")]
+fn sync_parent_directory(_: &Path) -> Result<(), PolicyFileError> {
+    // `replace_file_write_through` requests durable rename metadata through
+    // MoveFileExW; Windows does not expose a portable directory fsync handle.
+    Ok(())
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
 fn sync_parent_directory(_: &Path) -> Result<(), PolicyFileError> {
     Err(PolicyFileError::UnsupportedPlatform)
 }
 
 fn map_file_error(error: PolicyFileError) -> CheckpointPolicyStoreError {
     match error {
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, target_os = "windows")))]
         PolicyFileError::UnsupportedPlatform => CheckpointPolicyStoreError::UnsupportedPlatform,
         PolicyFileError::InvalidPath => CheckpointPolicyStoreError::InvalidPath,
-        #[cfg(unix)]
+        #[cfg(any(unix, target_os = "windows"))]
         PolicyFileError::LockContended => CheckpointPolicyStoreError::LockContended,
         PolicyFileError::CorruptFile => CheckpointPolicyStoreError::CorruptState,
         PolicyFileError::IoFailure => CheckpointPolicyStoreError::IoFailure,
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, target_os = "windows")))]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::{PermissionsExt, symlink};
+    #[cfg(target_os = "windows")]
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use ed25519_dalek::{Signer, SigningKey};
     use tempfile::tempdir;
 
     use super::*;
+    #[cfg(target_os = "windows")]
+    use crate::WindowsTpmRollbackGuard;
     use crate::{
         CheckpointPolicyBootstrapDraft, CheckpointPolicyUpdateDraft, CheckpointPublisherSignature,
         checkpoint_publisher_id,
@@ -933,6 +1057,69 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires an elevated process and writes one isolated TPM NV test index"]
+    fn real_windows_tpm_store_rejects_valid_policy_file_rollback_and_cleans_up() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("Vault-A1-CP1-WIN-store-{nonce}"));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("checkpoint-policy.bin");
+        let lock_path = directory.join("checkpoint-policy.bin.lock");
+        let old_keys = [
+            SigningKey::from_bytes(&[71; 32]),
+            SigningKey::from_bytes(&[72; 32]),
+            SigningKey::from_bytes(&[73; 32]),
+        ];
+        let next_keys = [
+            SigningKey::from_bytes(&[72; 32]),
+            SigningKey::from_bytes(&[74; 32]),
+            SigningKey::from_bytes(&[75; 32]),
+        ];
+        let (bootstrap_package, bootstrap_policy_id) = bootstrap_package(&old_keys);
+        let bootstrap = policy(&old_keys);
+        let update_package = update(&bootstrap, &old_keys, &next_keys, 2);
+        let mut guard = WindowsTpmRollbackGuard::new(&directory).unwrap();
+        guard.provision_scope(NETWORK, bootstrap_policy_id).unwrap();
+
+        let mut store = CheckpointPolicyStore::create_from_bootstrap_package(
+            &path,
+            &bootstrap_package,
+            NETWORK,
+            bootstrap_policy_id,
+            &mut guard,
+        )
+        .unwrap();
+        let generation_one_file = fs::read(&path).unwrap();
+        store.install_update(&update_package, &mut guard).unwrap();
+        assert_eq!(store.current_policy().generation(), 2);
+        drop(store);
+
+        fs::write(&path, generation_one_file).unwrap();
+        assert_eq!(
+            CheckpointPolicyStore::open_from_bootstrap_package(
+                &path,
+                &bootstrap_package,
+                NETWORK,
+                bootstrap_policy_id,
+                &mut guard,
+            )
+            .unwrap_err(),
+            CheckpointPolicyStoreError::RollbackDetected
+        );
+
+        guard
+            .cleanup_test_scope(NETWORK, bootstrap_policy_id)
+            .unwrap();
+        drop(guard);
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(&lock_path).unwrap();
+        fs::remove_dir(&directory).unwrap();
+    }
+
     #[test]
     fn store_rejects_same_generation_equivocation_and_corruption() {
         let directory = tempdir().unwrap();
@@ -1003,18 +1190,21 @@ mod tests {
         let bootstrap = policy(&keys);
         let mut guard = MemoryGuard::default();
         let store = CheckpointPolicyStore::create(&path, bootstrap.clone(), &mut guard).unwrap();
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert_eq!(
-            fs::metadata(path.with_file_name("checkpoint-policy.bin.lock"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(path.with_file_name("checkpoint-policy.bin.lock"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
         assert_eq!(
             CheckpointPolicyStore::create(&path, bootstrap.clone(), &mut guard).unwrap_err(),
             CheckpointPolicyStoreError::LockContended
@@ -1047,7 +1237,10 @@ mod tests {
         );
 
         let symlink_path = directory.path().join("linked-policy.bin");
+        #[cfg(unix)]
         symlink(&path, &symlink_path).unwrap();
+        #[cfg(target_os = "windows")]
+        fs::create_dir(&symlink_path).unwrap();
         assert_eq!(
             CheckpointPolicyStore::open(&symlink_path, bootstrap.clone(), &mut guard).unwrap_err(),
             CheckpointPolicyStoreError::InvalidPath

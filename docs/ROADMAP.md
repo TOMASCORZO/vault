@@ -255,10 +255,15 @@ Remaining A1 checkpoints:
   existing policy state. Real-device persistence and adversarial codec/path
   tests pass. This is not a Secure Enclave monotonic-counter claim.
   Evidence: `docs/evidence/A1_MACOS_KEYCHAIN_2026-09-03.md`.
-- [ ] **A1-CP1-WIN — Windows rollback-guard parity.** Implement and test the
-  TPM 2.0-backed profile, including NV freshness, crash recovery, reboot
-  persistence, TPM reset detection, and no software fallback. The exact handoff
-  is in `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`.
+- [ ] **A1-CP1-WIN — Windows rollback-guard parity.** The production-intent
+  native Windows implementation and live TPM adversarial suite pass: TPM NV
+  freshness, non-exportable Platform Crypto Provider authorization wrapping,
+  elevated one-time provisioning, ordinary non-elevated use, exact pending
+  recovery on both interruption boundaries, subprocess contention, valid-file
+  rollback, equivocation/regression, missing-index/reset detection, and no
+  software fallback. The only remaining closure step is the armed two-phase
+  real reboot persistence test plus final workspace/advisory gates. Evidence:
+  `docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
 - [ ] **A1-CP2 — checkpoint bootstrap ceremony.** The canonical artifact,
   all-publisher proof of possession, external policy-ID verification, and
   policy-store enforcement are implemented. Still define and execute actual
@@ -328,8 +333,9 @@ Remaining A2 checkpoints:
   not learn the wallet birthday, target interval, matches, or stopping point.
 - [ ] Implement concrete keychain/secure-element protection for wallet database
   keys, backup keys, and finalized-height floor. The macOS checkpoint-policy
-  anchor is implemented; its signed-app Data Protection Keychain profile and
-  Windows TPM parity remain.
+  anchor and Windows checkpoint-policy TPM adapter are implemented; its
+  signed-app Data Protection Keychain profile and hardware-backed coverage for
+  the other listed secrets/floors remain.
 - [ ] Implement and conformance-test non-Unix platform stores with equivalent
   ownership, no-follow, locking, atomicity, durability, and rollback guarantees.
 - [ ] Benchmark file growth, query/access timing, retrieval bandwidth, padding,

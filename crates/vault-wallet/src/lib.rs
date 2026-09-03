@@ -6,7 +6,7 @@
 //! volatile production store, or spendable unfinalized-note path. Its first
 //! encrypted transactional ShardTree store is production-intent, not release
 //! ready: concrete platform/hardware seed custody, trusted birthday/target
-//! bootstrap operations, Windows TPM rollback parity, recovery policy beyond
+//! bootstrap operations, final Windows TPM reboot acceptance, recovery policy beyond
 //! the bounded account range, migrations, platform key storage, crash injection,
 //! access-pattern benchmarks, and independent review remain H1 activation
 //! gates.
@@ -18,6 +18,8 @@ mod custody;
 mod macos_keychain_guard;
 mod recovery;
 mod storage;
+#[cfg(target_os = "windows")]
+mod windows_tpm_guard;
 
 pub use checkpoint_distribution::{
     AuthenticatedRecoveryTarget, CheckpointDistributionDraft, CheckpointDistributionError,
@@ -45,6 +47,8 @@ pub use recovery::{
 pub use storage::{
     EncryptedWalletDb, WalletBackupSummary, WalletDatabaseConfig, WalletDbError, WalletSpendWitness,
 };
+#[cfg(target_os = "windows")]
+pub use windows_tpm_guard::WindowsTpmRollbackGuard;
 
 use core::fmt;
 use std::collections::BTreeSet;

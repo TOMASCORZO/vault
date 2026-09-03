@@ -65,45 +65,60 @@ test binary: macOS rejected the unsigned test process with OSStatus `-34018`
 bundle, application identifier, and reviewed Keychain access-group entitlements;
 there must be no automatic runtime fallback between profiles.
 
-## Windows continuation checklist
+## Windows TPM profile implemented; reboot acceptance pending
 
-Continue on the Windows device from `codex/c1-transfer-v2` after pulling the
-commit that introduced `MacOsKeychainRollbackGuard`. Implement Windows as a
-separate `cfg(target_os = "windows")` module; do not weaken or emulate the
-macOS path and do not shell out to PowerShell or `tpmtool` from production code.
+`WindowsTpmRollbackGuard` is a separate `cfg(target_os = "windows")` adapter.
+Production code uses native Windows TBS and the Microsoft Platform Crypto
+Provider; it does not shell out to PowerShell or `tpmtool` and has no software
+fallback.
 
-Required result:
+The profile uses one SHA-256 TPM NV extend index from the TCG owner range. A
+scope-derived, bounded 32-candidate search avoids occupied handles. A random
+32-byte index authorization is encrypted by a user-scoped non-exportable
+2048-bit RSA TPM key; plaintext authorization and authorization-bearing TPM
+command buffers are zeroized. Provisioning retrieves Windows-managed storage
+owner authorization and therefore runs elevated exactly once. Ordinary loads
+and advances need no elevation.
 
-1. Select and document the Windows trust primitive before coding. Prefer a TPM
-   2.0 NV extend/counter design through native Windows APIs. Credential Manager
-   or DPAPI alone encrypts data but does not prove freshness, so it is not a
-   hardware rollback guarantee.
-2. Implement `WindowsTpmRollbackGuard` against the existing
-   `CheckpointPolicyRollbackGuard` trait. Bind every protected value to
-   `chain_id`, bootstrap policy ID, generation, and current policy ID.
-3. Use a machine/install-specific TPM namespace and non-exportable authorization
-   material. Never place an authorization secret in source, arguments, logs, or
-   the ordinary policy file. Absence after initialization must fail closed.
-4. Serialize concurrent writers across processes and design an explicit pending
-   journal for the non-atomic boundary between the signed policy log and TPM NV
-   advancement. Recovery must distinguish the old committed state, the exact
-   pending successor, and corruption; it must not skip or reset the protected
-   lineage.
-5. Reject regression, same-generation equivocation, wrong network/bootstrap,
-   malformed NV data, unauthorized access, missing TPM, TPM clear/reset,
-   lock contention, interrupted update, and read-back mismatch. There must be
-   no software-only fallback in a TPM-required profile.
-6. Add deterministic codec tests, every-byte mutation/truncation/extension
-   tests, two-process contention, policy-file rollback, same-generation branch,
-   deletion/reset, reboot persistence, and power/interruption recovery tests on
-   real Windows TPM 2.0 hardware.
-7. Run `cargo fmt --all -- --check`, the Windows wallet tests, workspace tests,
-   strict Clippy, rustdoc with warnings denied, and the dependency/advisory
-   check. Record Windows edition, build, Rust version, TPM manufacturer/firmware,
-   API/backend, and exact results in a dated evidence document.
-8. Update `docs/ROADMAP.md`, `docs/HANDOFF.md`, this runbook, and the recovery
-   specification. Do not call the Windows profile complete until real TPM
-   persistence and interruption tests pass.
+State is published with write-through replacement and contains the exact
+network, bootstrap policy ID, NV index, optional anchor, TPM digest, wrapped
+authorization, and checksum. Before every extend, a separate write-through
+pending record binds the old anchor/digest, exact successor, extend input, and
+expected digest. Recovery accepts only the exact pre-extend or post-extend TPM
+state. A scope-specific OS file lock serializes independent processes.
+
+Completed requirements:
+
+1. Exact scope binding, checked codecs, non-exportable authorization wrapping,
+   owner-range NV selection, and elevated/idempotent provisioning are implemented.
+2. Missing/reset NV state, wrong attributes, missing key, malformed state,
+   regression, same-generation branch, skipped generation, contention, and
+   read-back mismatch fail closed.
+3. Every-byte mutation/truncation/extension, real two-process contention, both
+   interruption states on live TPM, exact NV deletion/reset observation, and
+   valid policy-file rollback tests pass.
+4. Exact device, toolchain, commands, results, and residual risks are recorded
+   in `docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
+
+To finish the sole remaining hardware gate, run phase one elevated, perform a
+real Windows restart, then run phase two elevated. Do not run phase two without
+the intervening reboot merely to obtain a passing result:
+
+```powershell
+cargo test -p vault-wallet --lib --no-run
+# Run the emitted test executable elevated with:
+# windows_tpm_guard::tests::real_tpm_reboot_persistence_phase_one --exact --ignored --nocapture
+# Restart Windows.
+# Run the same executable/test build elevated with:
+# windows_tpm_guard::tests::real_tpm_reboot_persistence_phase_two_and_cleanup --exact --ignored --nocapture
+```
+
+Phase one intentionally leaves one isolated NV index, one test CNG key, and its
+test directory under `%TEMP%`. Phase two must reopen and advance that exact
+scope before deleting all three. If phase two fails, preserve the directory and
+inspect it; never clear the TPM or bulk-delete keys/indices. After it passes,
+run the final workspace, strict Clippy, rustdoc, and advisory gates before
+checking `A1-CP1-WIN` complete.
 
 The Windows work is platform parity. It does not reopen C1-C6 and requires no
 GPU.
