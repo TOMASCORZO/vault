@@ -6,7 +6,7 @@
 //! volatile production store, or spendable unfinalized-note path. Its first
 //! encrypted transactional ShardTree store is production-intent, not release
 //! ready: concrete platform/hardware seed custody, trusted birthday/target
-//! bootstrap operations, final Windows TPM reboot acceptance, recovery policy beyond
+//! bootstrap operations, recovery policy beyond
 //! the bounded account range, migrations, platform key storage, crash injection,
 //! access-pattern benchmarks, and independent review remain H1 activation
 //! gates.

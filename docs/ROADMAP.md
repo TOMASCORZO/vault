@@ -255,14 +255,15 @@ Remaining A1 checkpoints:
   existing policy state. Real-device persistence and adversarial codec/path
   tests pass. This is not a Secure Enclave monotonic-counter claim.
   Evidence: `docs/evidence/A1_MACOS_KEYCHAIN_2026-09-03.md`.
-- [ ] **A1-CP1-WIN — Windows rollback-guard parity.** The production-intent
+- [x] **A1-CP1-WIN — Windows rollback-guard parity.** The production-intent
   native Windows implementation and live TPM adversarial suite pass: TPM NV
   freshness, non-exportable Platform Crypto Provider authorization wrapping,
   elevated one-time provisioning, ordinary non-elevated use, exact pending
   recovery on both interruption boundaries, subprocess contention, valid-file
   rollback, equivocation/regression, missing-index/reset detection, and no
-  software fallback. The only remaining closure step is the armed two-phase
-  real reboot persistence test plus final workspace/advisory gates. Evidence:
+  software fallback. The two-phase test persisted and advanced the exact anchor
+  across a real Windows reboot, cleaned every isolated test resource, and the
+  final workspace/strict-Clippy/rustdoc/advisory gates passed. Evidence:
   `docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
 - [ ] **A1-CP2 — checkpoint bootstrap ceremony.** The canonical artifact,
   all-publisher proof of possession, external policy-ID verification, and

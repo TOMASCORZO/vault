@@ -24,10 +24,10 @@ The authoritative continuation branch is `codex/c1-transfer-v2` on
 `https://github.com/TOMASCORZO/vault`. Its latest published commits are:
 
 ```text
+64d28ec Implement Windows TPM rollback guard
+a8d2904 Protect checkpoint policy rollback on macOS
 988cfa5 Authenticate checkpoint policy bootstrap
 cfcd923 Document complete H1 progress ledger
-449a6cf Verify wallet backup rotations by restore
-82136ea Persist authenticated checkpoint policies
 ```
 
 On another machine or account, fetch and switch to that branch before making
@@ -92,8 +92,8 @@ scope-specific cross-process lock. A production-intent Windows adapter now uses
 native TBS with TPM 2.0 NV freshness and a non-exportable Platform Crypto
 Provider key. Existing policy state fails closed if its protected anchor is
 missing. The macOS profile is not a Secure Enclave monotonic-counter or
-whole-system-rollback claim. Final Windows cross-reboot acceptance, the
-signed-app macOS Data Protection Keychain profile, real publisher selection/offline
+whole-system-rollback claim. The Windows profile passed its real cross-reboot
+acceptance. The signed-app macOS Data Protection Keychain profile, real publisher selection/offline
 custody/release pinning, compaction operations, concrete custodians, and the
 production full-node/light-client adapter remain open, so A1 is not complete.
 The backup path also has a verified no-clobber export operation that restores
@@ -215,15 +215,13 @@ valid policy-file rollback, exact NV deletion/reset detection, and cleanup.
 Evidence and residual risks are in
 `docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
 
-The exact continuation point is phase two of the real reboot test in
-`docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`. Phase one passed on the
-boot that began `2026-08-29 20:13:38` local time and intentionally left one
-isolated test scope in `%TEMP%\Vault-A1-CP1-WIN-reboot-v1`. Restart Windows
-before running phase two elevated; phase two verifies/advances the same TPM
-anchor and cleans the exact test resources. Then update the evidence and check
-`A1-CP1-WIN` complete. The full Windows workspace, strict Clippy/rustdoc, WSL
-Linux parity, and advisory gates already pass and should be rerun only if code
-changes. C1-C6 remain closed and no GPU is needed.
+`A1-CP1-WIN` is complete at the production-intent acceptance boundary. Phase
+one ran on the boot that began `2026-08-29 20:13:38`; after Windows restarted at
+`2026-09-03 17:33:40`, elevated phase two reopened and advanced the exact TPM
+anchor and removed every isolated test resource. The final Windows workspace,
+strict Clippy/rustdoc, WSL Linux parity, and advisory gates pass. The exact next
+roadmap task is `A1-CP2`, the real checkpoint-bootstrap ceremony and its
+operator/release evidence. C1-C6 remain closed and no GPU is needed.
 
 No cryptographic comparison rental remains. C6 is complete and selects Halo2
 as the base-layer proof candidate. Stable Halo2 parameter/key serialization and
@@ -328,9 +326,9 @@ cryptographic scope.
 > stated boundaries. The real RISC Zero
 > receipt is published in release `c4-risc0-transfer-v2-v1`; do not restart
 > proving. Preserve C1-C6 as complete at their stated boundaries and continue
-> with the `A1-CP1-WIN` two-phase real reboot acceptance and final gates in
-> `docs/runbooks/CHECKPOINT_POLICY_ROLLBACK_GUARDS.md`; the implementation and
-> other live Windows TPM tests already pass. Keep activation and H2 separate. Do not
+> with `A1-CP2`, the checkpoint-bootstrap ceremony and its operator/release
+> evidence. macOS `A1-CP1` and Windows `A1-CP1-WIN` are complete at their
+> production-intent acceptance boundaries. Keep activation and H2 separate. Do not
 > create prototypes,
 > expand H1 with
 > H2/mainnet work, start contracts, use real funds, or claim production

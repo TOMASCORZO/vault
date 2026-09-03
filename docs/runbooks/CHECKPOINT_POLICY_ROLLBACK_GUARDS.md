@@ -65,7 +65,7 @@ test binary: macOS rejected the unsigned test process with OSStatus `-34018`
 bundle, application identifier, and reviewed Keychain access-group entitlements;
 there must be no automatic runtime fallback between profiles.
 
-## Windows TPM profile implemented; reboot acceptance pending
+## Windows TPM profile implemented and accepted
 
 `WindowsTpmRollbackGuard` is a separate `cfg(target_os = "windows")` adapter.
 Production code uses native Windows TBS and the Microsoft Platform Crypto
@@ -97,12 +97,14 @@ Completed requirements:
 3. Every-byte mutation/truncation/extension, real two-process contention, both
    interruption states on live TPM, exact NV deletion/reset observation, and
    valid policy-file rollback tests pass.
-4. Exact device, toolchain, commands, results, and residual risks are recorded
+4. A two-phase test persisted and advanced the exact protected anchor across a
+   real Windows reboot, then deleted its exact NV index, CNG key, and files.
+5. Exact device, toolchain, commands, results, and residual risks are recorded
    in `docs/evidence/A1_WINDOWS_TPM_2026-09-03.md`.
 
-To finish the sole remaining hardware gate, run phase one elevated, perform a
-real Windows restart, then run phase two elevated. Do not run phase two without
-the intervening reboot merely to obtain a passing result:
+The completed reboot procedure is reproducible by running phase one elevated,
+performing a real Windows restart, then running phase two elevated. Do not run
+phase two without the intervening reboot merely to obtain a passing result:
 
 ```powershell
 cargo test -p vault-wallet --lib --no-run
@@ -114,11 +116,11 @@ cargo test -p vault-wallet --lib --no-run
 ```
 
 Phase one intentionally leaves one isolated NV index, one test CNG key, and its
-test directory under `%TEMP%`. Phase two must reopen and advance that exact
-scope before deleting all three. If phase two fails, preserve the directory and
-inspect it; never clear the TPM or bulk-delete keys/indices. After it passes,
-run the final workspace, strict Clippy, rustdoc, and advisory gates before
-checking `A1-CP1-WIN` complete.
+test directory under `%TEMP%`. Phase two reopens and advances that exact scope
+before deleting all three. If phase two fails, preserve the directory and
+inspect it; never clear the TPM or bulk-delete keys/indices. The recorded run
+passed both phases and the final workspace, strict Clippy, rustdoc, and advisory
+gates.
 
 The Windows work is platform parity. It does not reopen C1-C6 and requires no
 GPU.

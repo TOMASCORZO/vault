@@ -1,8 +1,7 @@
 # A1 Windows TPM rollback-guard evidence — 2026-09-03
 
 **Checkpoint:** `A1-CP1-WIN`
-**Maturity:** production-intent; implementation and live adversarial TPM tests pass,
-but the final cross-reboot phase is still pending
+**Maturity:** production-intent; `A1-CP1-WIN` acceptance complete
 
 ## Device and toolchain
 
@@ -77,23 +76,28 @@ The interruption cases above are deterministic process-crash boundary tests on
 the real TPM, not a claim that AC power was physically removed at every CPU or
 filesystem instruction.
 
-## Remaining acceptance step
+## Cross-reboot acceptance
 
 Phase one of the ignored cross-reboot sequence passed before a boot that Windows
 reported as starting on `2026-08-29 20:13:38` local time. It intentionally left
 the exact test state under `%TEMP%\Vault-A1-CP1-WIN-reboot-v1` and its isolated
-TPM/CNG resources. Do not delete that directory or clear the TPM.
+TPM/CNG resources.
 
 The ignored tests
 `real_tpm_reboot_persistence_phase_one` and
 `real_tpm_reboot_persistence_phase_two_and_cleanup` provide an explicit
-cross-reboot sequence. Phase one leaves exactly one isolated test NV index,
-non-exportable test key, and checksummed test state. After a real Windows
-restart, phase two must reopen and advance the same anchor, then remove every
-test artifact. `A1-CP1-WIN` remains unchecked until that sequence and the final
-workspace/advisory gates are recorded. The immediate next action is a real
-Windows restart followed by elevated phase two; phase two has not been run in
-the current boot.
+cross-reboot sequence. Windows was then restarted and reported the new boot at
+`2026-09-03 17:33:40` local time. Elevated phase two reopened the exact
+checksummed state and TPM anchor, advanced it from generation 1 to generation 2,
+verified it after reopening, and removed the exact test NV index, CNG key,
+state, lock, and directory. Its exit code was zero.
+
+After phase two, the complete Windows workspace gate passed again: formatting,
+113 tests, all-target strict Clippy, and rustdoc with warnings denied. A fresh
+RustSec scan again found no vulnerability advisory and only the documented
+allowed `atomic-polyfill` maintenance warning. This completes `A1-CP1-WIN` at
+the production-intent acceptance boundary; it is not a wider A1 or mainnet
+readiness claim.
 
 ## Residual limits
 
