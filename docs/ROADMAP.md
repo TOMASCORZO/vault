@@ -230,6 +230,12 @@ Implemented production-intent foundation:
   reject mutation of every byte. The deterministic 379-byte update vector has
   BLAKE3 hash
   `687555c09469a235a1b48f08293bf318e39cb568733998d8e4599837b332a666`.
+- [x] Canonical generation-1 bootstrap packages (`VBOOT001`) that bind network,
+  threshold, canonical publisher keys, a nonzero ceremony nonce, and policy ID;
+  require proof-of-possession signatures from every publisher; and verify
+  against a separately pinned expected policy ID before policy-store creation
+  or opening. The deterministic 499-byte vector has BLAKE3 hash
+  `f6bc8a6b6e706d19ae2b810dc5efd8b6979a87ea6660bafc058174fd5330d317`.
 - [x] Bounded crash-consistent Unix checkpoint-policy history replayed from a
   pinned bootstrap, with atomic replacement, file/directory sync, owner-only
   paths, exclusive locking, an exact generation-plus-policy-ID rollback-anchor
@@ -245,8 +251,10 @@ Remaining A1 checkpoints:
 - [ ] **A1-CP1 — concrete rollback guard.** Implement and test at least one
   approved keychain/secure-element/TPM-backed `CheckpointPolicyRollbackGuard`
   that durably scopes and protects both generation and exact policy ID.
-- [ ] **A1-CP2 — checkpoint bootstrap ceremony.** Define generation-1 publisher
-  selection, offline key custody, threshold, policy-ID verification, binary or
+- [ ] **A1-CP2 — checkpoint bootstrap ceremony.** The canonical artifact,
+  all-publisher proof of possession, external policy-ID verification, and
+  policy-store enforcement are implemented. Still define and execute actual
+  publisher selection, offline key custody, threshold approval, binary or
   release-manifest pinning, independent operator confirmation, and recovery
   from a lost bootstrap artifact.
 - [ ] **A1-CP3 — checkpoint history compaction.** Define and test the explicit

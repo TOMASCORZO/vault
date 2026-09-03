@@ -146,6 +146,33 @@ revoked. The stable policy ID commits to the network, generation, threshold,
 count, and canonical key order under
 `vault.wallet.checkpoint-policy-id-v1.2026-09-02`.
 
+`CheckpointPolicyBootstrapDraft` encodes the generation-1 root as:
+
+```text
+"VBOOT001" || chain_id_32 || generation_be64(1) || threshold_u8 ||
+publisher_count_u8 || ordered(publisher_verifying_key_32) ||
+ceremony_nonce_32 || policy_id_32
+```
+
+Keys are ordered by their derived publisher IDs. Every configured publisher,
+not merely the operational threshold, must sign these exact bytes to prove key
+possession and agreement on the ceremony transcript. The nonce must be nonzero
+and unique to the ceremony. `verify_checkpoint_policy_bootstrap` reconstructs
+the policy, validates all signatures, and requires the encoded ID to equal a
+separately supplied expected policy ID. The deterministic two-of-three vector
+is 499 bytes and has BLAKE3 hash
+`f6bc8a6b6e706d19ae2b810dc5efd8b6979a87ea6660bafc058174fd5330d317`;
+its test rejects every single-byte mutation, every truncated prefix, and
+trailing data.
+
+The package proves possession, not the real-world identity or independence of
+its publishers. The expected policy ID MUST be pinned through the approved
+release manifest or independent operator-confirmation channel before the
+package is accepted. `CheckpointPolicyStore::create_from_bootstrap_package` and
+`CheckpointPolicyStore::open_from_bootstrap_package` enforce this verification
+at the persistent-store boundary; no public bare-policy initialization path is
+exposed.
+
 The deterministic two-of-three generation-1 to generation-2 update vector is
 379 bytes and has BLAKE3 hash
 `687555c09469a235a1b48f08293bf318e39cb568733998d8e4599837b332a666`.
@@ -168,9 +195,10 @@ which rejects an older valid file, same-generation equivocation, and a higher
 branch that skips a previously anchored policy. Installation writes the signed
 log before advancing the protected anchor; any uncertain file or guard failure
 poisons the handle, and reopening replays the durable log before retrying the
-anchor. Concrete keychain/secure-element guard implementations, bootstrap
-ceremony, 64-update compaction/re-bootstrap, and operational rotation drills
-remain activation gates.
+anchor. Concrete keychain/secure-element guard implementations, the real
+publisher selection/key-custody/release-pinning ceremony, 64-update
+compaction/re-bootstrap, and operational rotation drills remain activation
+gates.
 
 The deterministic empty-frontier two-of-three test package is 347 bytes and has
 BLAKE3 hash
@@ -320,10 +348,12 @@ Still required before real funds:
 
 - concrete approved platform/hardware custody, hardware-backed derivation,
   memory locking, crash-dump policy, and an offline recovery-package ceremony;
-- concrete rollback-resistant platform guard storage, bootstrap and policy-log
-  compaction ceremonies, operational rotation/revocation drills, and a
+- concrete rollback-resistant platform guard storage, real publisher
+  selection/key custody/release pinning and policy-log compaction ceremonies,
+  operational rotation/revocation drills, and a
   conservative user-facing override ceremony (authenticated successor-policy
-  delivery, bounded Unix history, birthday/target package formats, threshold
+  delivery, proof-of-possession bootstrap packages with an external policy-ID
+  pin, bounded Unix history, birthday/target package formats, threshold
   verification, independent-finality matching, and successor key removal are
   implemented);
 - a concrete validating full-node/light-client source plus private/padded

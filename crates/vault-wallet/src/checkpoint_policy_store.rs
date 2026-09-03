@@ -17,7 +17,8 @@ use tempfile::NamedTempFile;
 use vault_protocol::ChainId;
 
 use crate::{
-    CheckpointTrustPolicy, MAX_CHECKPOINT_POLICY_UPDATE_BYTES, verify_checkpoint_policy_update,
+    CheckpointTrustPolicy, MAX_CHECKPOINT_POLICY_UPDATE_BYTES, verify_checkpoint_policy_bootstrap,
+    verify_checkpoint_policy_update,
 };
 
 #[cfg(unix)]
@@ -115,6 +116,8 @@ pub enum CheckpointPolicyStoreError {
     StateAlreadyExists,
     /// Normal opening found no state file.
     StateMissing,
+    /// The supplied generation-1 artifact failed pinned bootstrap verification.
+    BootstrapRejected,
     /// Stored framing, checksum, update chain, or canonical encoding is invalid.
     CorruptState,
     /// The file belongs to another network or bootstrap policy lineage.
@@ -141,6 +144,7 @@ impl fmt::Display for CheckpointPolicyStoreError {
             Self::LockContended => "checkpoint policy store is already locked",
             Self::StateAlreadyExists => "checkpoint policy state already exists",
             Self::StateMissing => "checkpoint policy state is missing",
+            Self::BootstrapRejected => "checkpoint policy bootstrap was rejected",
             Self::CorruptState => "checkpoint policy state is corrupt",
             Self::ScopeMismatch => "checkpoint policy state has the wrong scope",
             Self::RollbackDetected => "checkpoint policy rollback or equivocation was detected",
@@ -186,8 +190,22 @@ impl fmt::Debug for CheckpointPolicyStore {
 }
 
 impl CheckpointPolicyStore {
+    /// Verifies a generation-1 artifact against an external pin, then creates its lineage.
+    pub fn create_from_bootstrap_package<G: CheckpointPolicyRollbackGuard>(
+        path: impl AsRef<Path>,
+        package: &[u8],
+        expected_chain_id: ChainId,
+        expected_policy_id: [u8; 32],
+        guard: &mut G,
+    ) -> Result<Self, CheckpointPolicyStoreError> {
+        let bootstrap =
+            verify_checkpoint_policy_bootstrap(package, expected_chain_id, expected_policy_id)
+                .map_err(|_| CheckpointPolicyStoreError::BootstrapRejected)?;
+        Self::create(path, bootstrap, guard)
+    }
+
     /// Creates and anchors a new policy lineage without overwriting state.
-    pub fn create<G: CheckpointPolicyRollbackGuard>(
+    fn create<G: CheckpointPolicyRollbackGuard>(
         path: impl AsRef<Path>,
         bootstrap: CheckpointTrustPolicy,
         guard: &mut G,
@@ -224,7 +242,7 @@ impl CheckpointPolicyStore {
     }
 
     /// Opens and verifies the complete chain from an independently pinned bootstrap.
-    pub fn open<G: CheckpointPolicyRollbackGuard>(
+    fn open<G: CheckpointPolicyRollbackGuard>(
         path: impl AsRef<Path>,
         bootstrap: CheckpointTrustPolicy,
         guard: &mut G,
@@ -246,6 +264,20 @@ impl CheckpointPolicyStore {
         };
         store.synchronize_guard(guard)?;
         Ok(store)
+    }
+
+    /// Verifies a pinned generation-1 artifact, then opens and replays its lineage.
+    pub fn open_from_bootstrap_package<G: CheckpointPolicyRollbackGuard>(
+        path: impl AsRef<Path>,
+        package: &[u8],
+        expected_chain_id: ChainId,
+        expected_policy_id: [u8; 32],
+        guard: &mut G,
+    ) -> Result<Self, CheckpointPolicyStoreError> {
+        let bootstrap =
+            verify_checkpoint_policy_bootstrap(package, expected_chain_id, expected_policy_id)
+                .map_err(|_| CheckpointPolicyStoreError::BootstrapRejected)?;
+        Self::open(path, bootstrap, guard)
     }
 
     /// Verifies, persists, and rollback-anchors one complete successor update.
@@ -678,7 +710,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CheckpointPolicyUpdateDraft, CheckpointPublisherSignature, checkpoint_publisher_id,
+        CheckpointPolicyBootstrapDraft, CheckpointPolicyUpdateDraft, CheckpointPublisherSignature,
+        checkpoint_publisher_id,
     };
 
     const NETWORK: ChainId = ChainId::new([0xA1; 32]);
@@ -773,6 +806,63 @@ mod tests {
             })
             .collect();
         draft.assemble(signatures).unwrap()
+    }
+
+    fn bootstrap_package(keys: &[SigningKey]) -> (Vec<u8>, [u8; 32]) {
+        let bootstrap = policy(keys);
+        let draft = CheckpointPolicyBootstrapDraft::new(
+            NETWORK,
+            2,
+            keys.iter()
+                .map(|key| key.verifying_key().to_bytes())
+                .collect(),
+            [0xB2; 32],
+        )
+        .unwrap();
+        let signatures = keys
+            .iter()
+            .map(|key| {
+                CheckpointPublisherSignature::new(
+                    checkpoint_publisher_id(key.verifying_key().to_bytes()),
+                    key.sign(draft.signing_bytes()).to_bytes(),
+                )
+            })
+            .collect();
+        (draft.assemble(signatures).unwrap(), bootstrap.policy_id())
+    }
+
+    #[test]
+    fn store_initializes_only_from_the_pinned_bootstrap_artifact() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("checkpoint-policy.bin");
+        let keys = [
+            SigningKey::from_bytes(&[26; 32]),
+            SigningKey::from_bytes(&[27; 32]),
+            SigningKey::from_bytes(&[28; 32]),
+        ];
+        let (package, policy_id) = bootstrap_package(&keys);
+        let mut guard = MemoryGuard::default();
+        let store = CheckpointPolicyStore::create_from_bootstrap_package(
+            &path, &package, NETWORK, policy_id, &mut guard,
+        )
+        .unwrap();
+        assert_eq!(store.current_policy().policy_id(), policy_id);
+        drop(store);
+
+        let reopened = CheckpointPolicyStore::open_from_bootstrap_package(
+            &path, &package, NETWORK, policy_id, &mut guard,
+        )
+        .unwrap();
+        assert_eq!(reopened.current_policy().generation(), 1);
+        drop(reopened);
+
+        assert_eq!(
+            CheckpointPolicyStore::open_from_bootstrap_package(
+                &path, &package, NETWORK, [0xFF; 32], &mut guard,
+            )
+            .unwrap_err(),
+            CheckpointPolicyStoreError::BootstrapRejected
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Vault Project Handoff
 
-**Updated:** 2026-09-02
+**Updated:** 2026-09-03
 **Current milestone:** H1 — private-transfer production foundation  
 **Maturity:** production-intent, not activated, not safe for real funds
 
@@ -24,10 +24,10 @@ The authoritative continuation branch is `codex/c1-transfer-v2` on
 `https://github.com/TOMASCORZO/vault`. Its latest published commits are:
 
 ```text
+cfcd923 Document complete H1 progress ledger
 449a6cf Verify wallet backup rotations by restore
 82136ea Persist authenticated checkpoint policies
 87777ac Authenticate wallet recovery targets
-386de47 Authenticate wallet birthday checkpoint distribution
 ```
 
 On another machine or account, fetch and switch to that branch before making
@@ -77,13 +77,18 @@ The latest completed A1 sub-blocks are the typed seed boundary in
 `crates/vault-wallet/src/custody.rs` and distinct threshold-authenticated
 birthday/target distribution in
 `crates/vault-wallet/src/checkpoint_distribution.rs`, plus the bounded Unix
-policy history in `crates/vault-wallet/src/checkpoint_policy_store.rs`. A
+policy history in `crates/vault-wallet/src/checkpoint_policy_store.rs`. The
+same boundary now accepts a canonical generation-1 bootstrap only when every
+publisher proves key possession and its policy ID matches a separately trusted
+pin. This is machine-verifiable ceremony evidence, not publisher identity or a
+self-authenticating root of trust. A
 checkpoint package is accepted only when it also matches an independently
 consensus-verified header; publisher quorum is not finality. Successor policies
 are authenticated by their exact predecessor, remove revoked keys, and are
 replayed from a pinned bootstrap. The store anchors generation plus policy ID
 through a platform boundary. Concrete keychain/secure-element rollback guards,
-bootstrap/compaction operations, concrete custodians, and the production
+real publisher selection/offline custody/release pinning, compaction operations,
+concrete custodians, and the production
 full-node/light-client adapter remain open, so A1 is not complete.
 The backup path also has a verified no-clobber export operation that restores
 the new copy through the complete validation path in a protected temporary

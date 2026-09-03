@@ -14,12 +14,14 @@ use crate::WalletBirthdayCheckpoint;
 
 const CHECKPOINT_MAGIC: [u8; 8] = *b"VCKPT001";
 const TARGET_MAGIC: [u8; 8] = *b"VTARG001";
+const POLICY_BOOTSTRAP_MAGIC: [u8; 8] = *b"VBOOT001";
 const POLICY_UPDATE_MAGIC: [u8; 8] = *b"VPOLY001";
 const CHECKPOINT_PUBLISHER_ID_DOMAIN: &str = "vault.wallet.checkpoint-publisher-id-v1.2026-09-02";
 const CHECKPOINT_POLICY_ID_DOMAIN: &str = "vault.wallet.checkpoint-policy-id-v1.2026-09-02";
 const MAX_FRONTIER_OMMERS: usize = 32;
 const FIXED_SIGNING_BYTES: usize = 8 + 32 + 8 + 32 + 8 + 32 + 1 + 32 + 1;
 const TARGET_SIGNING_BYTES: usize = 8 + 32 + 8 + 32 + 8 + 32;
+const POLICY_BOOTSTRAP_FIXED_SIGNING_BYTES: usize = 8 + 32 + 8 + 1 + 1 + 32 + 32;
 const POLICY_UPDATE_FIXED_SIGNING_BYTES: usize = 8 + 32 + 8 + 32 + 8 + 1 + 1;
 const SIGNATURE_RECORD_BYTES: usize = 32 + 64;
 const MAX_CHECKPOINT_DISTRIBUTION_BYTES: usize = FIXED_SIGNING_BYTES
@@ -29,6 +31,11 @@ const MAX_CHECKPOINT_DISTRIBUTION_BYTES: usize = FIXED_SIGNING_BYTES
 
 /// Maximum independent publisher keys in one checkpoint trust policy.
 pub const MAX_CHECKPOINT_PUBLISHERS: usize = 8;
+/// Maximum encoded bytes in one proof-of-possession bootstrap package.
+pub const MAX_CHECKPOINT_POLICY_BOOTSTRAP_BYTES: usize = POLICY_BOOTSTRAP_FIXED_SIGNING_BYTES
+    + MAX_CHECKPOINT_PUBLISHERS * 32
+    + 1
+    + MAX_CHECKPOINT_PUBLISHERS * SIGNATURE_RECORD_BYTES;
 /// Maximum encoded bytes in one authenticated publisher-policy update.
 pub const MAX_CHECKPOINT_POLICY_UPDATE_BYTES: usize = POLICY_UPDATE_FIXED_SIGNING_BYTES
     + MAX_CHECKPOINT_PUBLISHERS * 32
@@ -44,6 +51,8 @@ pub enum CheckpointDistributionError {
     WrongNetwork,
     /// Publisher keys or the required threshold are invalid.
     InvalidPolicy,
+    /// The bootstrap artifact does not match its separately pinned policy ID.
+    BootstrapMismatch,
     /// An update does not descend from the exact active publisher policy.
     PolicyPredecessorMismatch,
     /// Publisher records are unknown, duplicated, unsorted, or fail signature verification.
@@ -58,6 +67,7 @@ impl fmt::Display for CheckpointDistributionError {
             Self::InvalidEncoding => "checkpoint distribution encoding is invalid",
             Self::WrongNetwork => "checkpoint distribution belongs to another network",
             Self::InvalidPolicy => "checkpoint publisher policy is invalid",
+            Self::BootstrapMismatch => "checkpoint bootstrap does not match its pinned policy ID",
             Self::PolicyPredecessorMismatch => {
                 "checkpoint publisher policy predecessor does not match"
             }
@@ -188,6 +198,81 @@ impl CheckpointTrustPolicy {
             threshold,
             publishers,
         })
+    }
+}
+
+/// Canonical generation-1 policy awaiting proof of possession from every key.
+pub struct CheckpointPolicyBootstrapDraft {
+    signing_bytes: Vec<u8>,
+    publisher_count: usize,
+}
+
+impl fmt::Debug for CheckpointPolicyBootstrapDraft {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CheckpointPolicyBootstrapDraft")
+            .field("signing_bytes", &self.signing_bytes.len())
+            .field("publisher_count", &self.publisher_count)
+            .finish()
+    }
+}
+
+impl CheckpointPolicyBootstrapDraft {
+    /// Builds a generation-1 artifact from the complete publisher set.
+    ///
+    /// `ceremony_nonce` must be sampled independently for this ceremony. The
+    /// resulting policy ID must still be pinned through a trusted release or
+    /// operator-confirmation channel; signatures cannot make a root trust
+    /// decision self-authenticating.
+    pub fn new(
+        chain_id: ChainId,
+        threshold: usize,
+        publisher_keys: Vec<[u8; 32]>,
+        ceremony_nonce: [u8; 32],
+    ) -> Result<Self, CheckpointDistributionError> {
+        if ceremony_nonce == [0; 32] {
+            return Err(CheckpointDistributionError::InvalidPolicy);
+        }
+        let policy = CheckpointTrustPolicy::new(chain_id, threshold, publisher_keys)?;
+        let mut bytes =
+            Vec::with_capacity(POLICY_BOOTSTRAP_FIXED_SIGNING_BYTES + policy.publishers.len() * 32);
+        bytes.extend_from_slice(&POLICY_BOOTSTRAP_MAGIC);
+        bytes.extend_from_slice(policy.chain_id.as_bytes());
+        bytes.extend_from_slice(&policy.generation.to_be_bytes());
+        bytes.push(
+            u8::try_from(policy.threshold)
+                .map_err(|_| CheckpointDistributionError::InvalidPolicy)?,
+        );
+        bytes.push(
+            u8::try_from(policy.publishers.len())
+                .map_err(|_| CheckpointDistributionError::InvalidPolicy)?,
+        );
+        for publisher in &policy.publishers {
+            bytes.extend_from_slice(publisher.key.as_bytes());
+        }
+        bytes.extend_from_slice(&ceremony_nonce);
+        bytes.extend_from_slice(&policy.policy_id());
+        Ok(Self {
+            signing_bytes: bytes,
+            publisher_count: policy.publishers.len(),
+        })
+    }
+
+    /// Exact ceremony-bound bytes every configured publisher must sign.
+    #[must_use]
+    pub fn signing_bytes(&self) -> &[u8] {
+        &self.signing_bytes
+    }
+
+    /// Appends one proof-of-possession signature from every publisher.
+    pub fn assemble(
+        self,
+        signatures: Vec<CheckpointPublisherSignature>,
+    ) -> Result<Vec<u8>, CheckpointDistributionError> {
+        if signatures.len() != self.publisher_count {
+            return Err(CheckpointDistributionError::AuthenticationFailed);
+        }
+        assemble_signed_package(self.signing_bytes, signatures)
     }
 }
 
@@ -428,6 +513,60 @@ fn assemble_signed_package(
         signing_bytes.extend_from_slice(&signature.signature);
     }
     Ok(signing_bytes)
+}
+
+/// Verifies a generation-1 bootstrap against a separately pinned policy ID.
+///
+/// Every configured publisher must prove possession of its private key. This
+/// does not authenticate publisher identity: callers must obtain
+/// `expected_policy_id` through the approved release/bootstrap ceremony.
+pub fn verify_checkpoint_policy_bootstrap(
+    package: &[u8],
+    expected_chain_id: ChainId,
+    expected_policy_id: [u8; 32],
+) -> Result<CheckpointTrustPolicy, CheckpointDistributionError> {
+    let minimum_bytes = POLICY_BOOTSTRAP_FIXED_SIGNING_BYTES + 32 + 1 + SIGNATURE_RECORD_BYTES;
+    if package.len() < minimum_bytes || package.len() > MAX_CHECKPOINT_POLICY_BOOTSTRAP_BYTES {
+        return Err(CheckpointDistributionError::InvalidEncoding);
+    }
+    let mut reader = Reader::new(package);
+    if reader.take::<8>()? != POLICY_BOOTSTRAP_MAGIC {
+        return Err(CheckpointDistributionError::InvalidEncoding);
+    }
+    let chain_id = ChainId::new(reader.take()?);
+    if chain_id != expected_chain_id {
+        return Err(CheckpointDistributionError::WrongNetwork);
+    }
+    let generation = u64::from_be_bytes(reader.take()?);
+    let threshold = usize::from(reader.take::<1>()?[0]);
+    let publisher_count = usize::from(reader.take::<1>()?[0]);
+    if generation != 1 || publisher_count == 0 || publisher_count > MAX_CHECKPOINT_PUBLISHERS {
+        return Err(CheckpointDistributionError::InvalidPolicy);
+    }
+    let mut publisher_keys = Vec::with_capacity(publisher_count);
+    let mut previous_id = None;
+    for _ in 0..publisher_count {
+        let key = reader.take::<32>()?;
+        let publisher_id = checkpoint_publisher_id(key);
+        if previous_id.is_some_and(|previous| previous >= publisher_id) {
+            return Err(CheckpointDistributionError::InvalidEncoding);
+        }
+        previous_id = Some(publisher_id);
+        publisher_keys.push(key);
+    }
+    if reader.take::<32>()? == [0; 32] {
+        return Err(CheckpointDistributionError::InvalidPolicy);
+    }
+    let encoded_policy_id = reader.take::<32>()?;
+    let signing_end = reader.position();
+
+    let policy = CheckpointTrustPolicy::new(chain_id, threshold, publisher_keys.clone())?;
+    if encoded_policy_id != policy.policy_id() || encoded_policy_id != expected_policy_id {
+        return Err(CheckpointDistributionError::BootstrapMismatch);
+    }
+    let proof_policy = CheckpointTrustPolicy::new(chain_id, publisher_count, publisher_keys)?;
+    verify_signature_records(package, signing_end, &mut reader, &proof_policy)?;
+    Ok(policy)
 }
 
 /// Authenticates and reconstructs a complete successor publisher policy.
@@ -711,6 +850,116 @@ mod tests {
             .unwrap();
         let signed = signatures(draft.signing_bytes(), signing_keys);
         draft.assemble(signed).unwrap()
+    }
+
+    #[test]
+    fn bootstrap_requires_every_key_and_the_separately_pinned_policy_id() {
+        const EXPECTED_BOOTSTRAP_HASH: [u8; 32] = [
+            0xf6, 0xbc, 0x8a, 0x6b, 0x6e, 0x70, 0x6d, 0x19, 0xae, 0x2b, 0x81, 0x0d, 0xc5, 0xef,
+            0xd8, 0xb6, 0x97, 0x9a, 0x87, 0xea, 0x66, 0x60, 0xba, 0xfc, 0x05, 0x81, 0x74, 0xfd,
+            0x53, 0x30, 0xd3, 0x17,
+        ];
+        let keys = [
+            SigningKey::from_bytes(&[71; 32]),
+            SigningKey::from_bytes(&[72; 32]),
+            SigningKey::from_bytes(&[73; 32]),
+        ];
+        let publisher_keys = keys
+            .iter()
+            .map(|key| key.verifying_key().to_bytes())
+            .collect::<Vec<_>>();
+        let policy =
+            CheckpointTrustPolicy::new(ChainId::new(NETWORK), 2, publisher_keys.clone()).unwrap();
+        let draft = CheckpointPolicyBootstrapDraft::new(
+            ChainId::new(NETWORK),
+            2,
+            publisher_keys.clone(),
+            [0xB1; 32],
+        )
+        .unwrap();
+        let all_signatures = signatures(draft.signing_bytes(), &keys);
+        let package = draft.assemble(all_signatures).unwrap();
+
+        assert_eq!(package.len(), 499);
+        assert_eq!(blake3::hash(&package).as_bytes(), &EXPECTED_BOOTSTRAP_HASH);
+        let verified =
+            verify_checkpoint_policy_bootstrap(&package, ChainId::new(NETWORK), policy.policy_id())
+                .unwrap();
+        assert_eq!(verified.chain_id(), policy.chain_id());
+        assert_eq!(verified.generation(), 1);
+        assert_eq!(verified.policy_id(), policy.policy_id());
+
+        let incomplete = CheckpointPolicyBootstrapDraft::new(
+            ChainId::new(NETWORK),
+            2,
+            publisher_keys,
+            [0xB1; 32],
+        )
+        .unwrap();
+        let incomplete_signatures = signatures(incomplete.signing_bytes(), &keys[..2]);
+        assert_eq!(
+            incomplete.assemble(incomplete_signatures).unwrap_err(),
+            CheckpointDistributionError::AuthenticationFailed
+        );
+        assert_eq!(
+            verify_checkpoint_policy_bootstrap(&package, ChainId::new(NETWORK), [0xFF; 32])
+                .unwrap_err(),
+            CheckpointDistributionError::BootstrapMismatch
+        );
+        assert_eq!(
+            verify_checkpoint_policy_bootstrap(
+                &package,
+                ChainId::new([0xFF; 32]),
+                policy.policy_id()
+            )
+            .unwrap_err(),
+            CheckpointDistributionError::WrongNetwork
+        );
+        assert!(
+            CheckpointPolicyBootstrapDraft::new(
+                ChainId::new(NETWORK),
+                2,
+                keys.iter()
+                    .map(|key| key.verifying_key().to_bytes())
+                    .collect(),
+                [0; 32],
+            )
+            .is_err()
+        );
+
+        for index in 0..package.len() {
+            let mut mutated = package.clone();
+            mutated[index] ^= 1;
+            assert!(
+                verify_checkpoint_policy_bootstrap(
+                    &mutated,
+                    ChainId::new(NETWORK),
+                    policy.policy_id()
+                )
+                .is_err(),
+                "bootstrap mutation at byte {index} was accepted"
+            );
+        }
+        for length in 0..package.len() {
+            assert!(
+                verify_checkpoint_policy_bootstrap(
+                    &package[..length],
+                    ChainId::new(NETWORK),
+                    policy.policy_id()
+                )
+                .is_err()
+            );
+        }
+        let mut trailing = package;
+        trailing.push(0);
+        assert!(
+            verify_checkpoint_policy_bootstrap(
+                &trailing,
+                ChainId::new(NETWORK),
+                policy.policy_id()
+            )
+            .is_err()
+        );
     }
 
     #[test]

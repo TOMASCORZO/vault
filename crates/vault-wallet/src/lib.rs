@@ -19,10 +19,12 @@ mod storage;
 
 pub use checkpoint_distribution::{
     AuthenticatedRecoveryTarget, CheckpointDistributionDraft, CheckpointDistributionError,
-    CheckpointPolicyUpdateDraft, CheckpointPublisherSignature, CheckpointTrustPolicy,
+    CheckpointPolicyBootstrapDraft, CheckpointPolicyUpdateDraft, CheckpointPublisherSignature,
+    CheckpointTrustPolicy, MAX_CHECKPOINT_POLICY_BOOTSTRAP_BYTES,
     MAX_CHECKPOINT_POLICY_UPDATE_BYTES, MAX_CHECKPOINT_PUBLISHERS, RecoveryTargetDistributionDraft,
     checkpoint_publisher_id, verify_birthday_checkpoint_distribution,
-    verify_checkpoint_policy_update, verify_recovery_target_distribution,
+    verify_checkpoint_policy_bootstrap, verify_checkpoint_policy_update,
+    verify_recovery_target_distribution,
 };
 pub use checkpoint_policy_store::{
     CheckpointPolicyAnchor, CheckpointPolicyRollbackGuard, CheckpointPolicyRollbackGuardError,
