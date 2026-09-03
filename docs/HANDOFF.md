@@ -24,10 +24,10 @@ The authoritative continuation branch is `codex/c1-transfer-v2` on
 `https://github.com/TOMASCORZO/vault`. Its latest published commits are:
 
 ```text
+449a6cf Verify wallet backup rotations by restore
+82136ea Persist authenticated checkpoint policies
 87777ac Authenticate wallet recovery targets
 386de47 Authenticate wallet birthday checkpoint distribution
-208ce5a Add typed wallet seed custody boundary
-fd46784 Persist canonical Halo2 parameters for A4
 ```
 
 On another machine or account, fetch and switch to that branch before making
@@ -109,6 +109,12 @@ immediately and again after reopening the saved artifact; the local copy's
 SHA-256 matches the remote manifest. C1 is complete at the
 implementation-evidence boundary. Exact provenance and remaining limitations
 are recorded in `docs/evidence/C1_RISC0_CUDA_2026-08-31.md`.
+
+`docs/ROADMAP.md` now contains the detailed H1 completion ledger. It enumerates
+the completed C1-C6 evidence, completed production-intent A1-A4 foundations,
+every remaining A1-A5 checkpoint, and the H2 dependencies that must not be
+counted as unfinished H1 cryptography. Continue from that ledger rather than
+reconstructing progress or percentages from chat history.
 
 C2 is complete at the implementation-evidence boundary. The monolithic Halo2
 2/4/8/16-action shapes use deterministic transparent parameters at `k = 15`
